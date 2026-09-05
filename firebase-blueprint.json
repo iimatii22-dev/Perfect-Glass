@@ -1,0 +1,233 @@
+{
+  "entities": {
+    "Cliente": {
+      "title": "Cliente",
+      "description": "Ficha del cliente con frecuencia de visita, fidelidad y datos de servicio",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "ID de Firebase Auth del cliente" },
+        "emailRegistro": { "type": "string", "description": "Email con el que se registró el cliente" },
+        "localComercial": { "type": "string", "description": "Nombre del comercio o casa del cliente" },
+        "estadoRegistro": { "type": "string", "enum": ["pendiente", "aprobado", "rechazado"], "description": "Estado de la solicitud de registro" },
+        "nombre": { "type": "string", "description": "Nombre o Razón Social" },
+        "telefono": { "type": "string", "description": "Teléfono de contacto" },
+        "direccion": { "type": "string", "description": "Dirección física" },
+        "zona": { "type": "string", "description": "Barrio o zona geográfica" },
+        "tipoSuperficie": { "type": "string", "description": "Tipo de vidrio o superficie" },
+        "frecuenciaVisitaDias": { "type": "number", "description": "Frecuencia de visita en días" },
+        "duracionServicioMinutos": { "type": "number", "description": "Duración estimada del servicio en minutos (def 30)" },
+        "fechaUltimaVisita": { "type": "string", "description": "Fecha de última visita (YYYY-MM-DD)" },
+        "fechaProximaVisita": { "type": "string", "description": "Fecha calculada de próxima visita" },
+        "notas": { "type": "string", "description": "Observaciones e instrucciones operativas" },
+        "fotoAntes": { "type": "string", "description": "URL de foto antes del servicio" },
+        "fotoDespues": { "type": "string", "description": "URL de foto después del servicio" },
+        "activo": { "type": "boolean", "description": "Estado activo o inactivo" },
+        "sellosAcumulados": { "type": "number", "description": "Sellos de fidelidad acumulados" },
+        "sellosNecesarios": { "type": "number", "description": "Sellos necesarios para la recompensa" },
+        "recompensaDescripcion": { "type": "string", "description": "Descripción de la recompensa" },
+        "recompensaDisponible": { "type": "boolean", "description": "Indica si tiene recompensa lista para canjear" },
+        "totalRecompensasCanjeadas": { "type": "number", "description": "Total histórico de recompensas canjeadas" },
+        "fechaUltimoCanje": { "type": "string", "description": "Fecha del último canje de recompensa" },
+        "ultimaResenaEnviada": { "type": "string", "description": "Timestamp ISO o fecha de la última reseña enviada por el cliente" },
+        "createdAt": { "type": "string", "description": "Timestamp de creación" },
+        "updatedAt": { "type": "string", "description": "Timestamp de última modificación" }
+      },
+      "required": ["nombre", "telefono"]
+    },
+    "SelloHistorial": {
+      "title": "SelloHistorial",
+      "description": "Historial inmutable de sellos otorgados al cliente",
+      "type": "object",
+      "properties": {
+        "fecha": { "type": "string", "description": "Timestamp inmutable de otorgamiento" },
+        "otorgadoPor": { "type": "string", "description": "Identificador del vidriero ('vidriero')" },
+        "visible": { "type": "boolean", "description": "Indica si el sello es visible al cliente (true)" },
+        "tipo": { "type": "string", "enum": ["visita", "correccion", "canje"], "description": "Tipo de evento de sello" },
+        "notas": { "type": "string", "description": "Notas o aclaraciones de la visita o corrección" }
+      },
+      "required": ["fecha", "otorgadoPor", "visible"]
+    },
+    "Turno": {
+      "title": "Turno",
+      "description": "Turno agendado públicamente por un cliente o prospecto",
+      "type": "object",
+      "properties": {
+        "clienteId": { "type": "string", "description": "ID del cliente en la base o 'nuevoCliente'" },
+        "nombreCliente": { "type": "string", "description": "Nombre del cliente" },
+        "telefonoCliente": { "type": "string", "description": "Teléfono de contacto del cliente" },
+        "emailCliente": { "type": "string", "description": "Correo electrónico del cliente" },
+        "direccion": { "type": "string", "description": "Dirección donde se realizará el servicio" },
+        "fecha": { "type": "string", "description": "Fecha del turno (YYYY-MM-DD)" },
+        "horaInicio": { "type": "string", "description": "Hora de inicio del turno (HH:mm)" },
+        "horaFin": { "type": "string", "description": "Hora de finalización estimada (HH:mm)" },
+        "duracionMinutos": { "type": "number", "description": "Duración del turno en minutos" },
+        "estado": { "type": "string", "enum": ["confirmado", "cancelado", "completado"], "description": "Estado del turno" },
+        "notas": { "type": "string", "description": "Notas o requerimientos especiales" },
+        "cancelToken": { "type": "string", "description": "Token único de seguridad para cancelación pública" },
+        "creadoEn": { "type": "string", "description": "Timestamp ISO de creación" }
+      },
+      "required": ["nombreCliente", "telefonoCliente", "fecha", "horaInicio", "horaFin", "estado"]
+    },
+    "BusinessConfig": {
+      "title": "BusinessConfig",
+      "description": "Configuración del negocio Perfect Glass y auto-agendamiento",
+      "type": "object",
+      "properties": {
+        "nombreNegocio": { "type": "string" },
+        "telefono": { "type": "string" },
+        "direccion": { "type": "string" },
+        "logoUrl": { "type": "string" },
+        "instagram": { "type": "string" },
+        "whatsapp": { "type": "string" },
+        "facebook": { "type": "string" },
+        "colorPrimario": { "type": "string" },
+        "sellosNecesarios": { "type": "number" },
+        "recompensaDescripcion": { "type": "string" },
+        "horaInicioJornada": { "type": "string", "description": "Hora inicio de jornada (ej: 08:00)" },
+        "horaFinJornada": { "type": "string", "description": "Hora fin de jornada (ej: 18:00)" },
+        "duracionServicioDefaultMinutos": { "type": "number", "description": "Duración por defecto para nuevos turnos (ej: 30)" },
+        "emailVidriero": { "type": "string", "description": "Email para recibir alertas de turnos" },
+        "mensajeEmailConfirmacion": { "type": "string", "description": "Plantilla personalizada de confirmación" },
+        "diasLaborables": { "type": "array", "description": "Días de la semana habilitados para agendar (0=Dom, 1=Lun, ..., 6=Sáb)" }
+      }
+    },
+    "TarifasConfig": {
+      "title": "TarifasConfig",
+      "description": "Tarifas y precios base por metro cuadrado y servicio mínimo",
+      "type": "object",
+      "properties": {
+        "precioPorM2VidrioComun": { "type": "number", "description": "Precio base por m2 de vidrio común" },
+        "precioPorM2VidrioTemplado": { "type": "number", "description": "Precio base por m2 de vidrio templado" },
+        "precioPorM2Espejo": { "type": "number", "description": "Precio base por m2 de espejo" },
+        "precioMinimoServicio": { "type": "number", "description": "Cobro mínimo por servicio" },
+        "monedaSimbolo": { "type": "string", "description": "Símbolo de moneda (ej: $)" },
+        "actualizadoEn": { "type": "string", "description": "Timestamp ISO" }
+      }
+    },
+    "PlantillaPresupuesto": {
+      "title": "PlantillaPresupuesto",
+      "description": "Plantilla reutilizable de cotización frecuente",
+      "type": "object",
+      "properties": {
+        "nombre": { "type": "string", "description": "Nombre de la plantilla" },
+        "descripcion": { "type": "string", "description": "Detalle descriptivo" },
+        "items": { "type": "array", "description": "Lista de ítems presupuestados" },
+        "creadoEn": { "type": "string", "description": "Timestamp ISO de creación" }
+      },
+      "required": ["nombre", "items"]
+    },
+    "Presupuesto": {
+      "title": "Presupuesto",
+      "description": "Cotización generada para un cliente con cálculo por m2 y envío WhatsApp",
+      "type": "object",
+      "properties": {
+        "clienteId": { "type": "string", "description": "ID del cliente vinculado o null" },
+        "clienteNombre": { "type": "string", "description": "Nombre del cliente o contacto" },
+        "clienteTelefono": { "type": "string", "description": "Teléfono de WhatsApp" },
+        "fecha": { "type": "string", "description": "Fecha del presupuesto (YYYY-MM-DD)" },
+        "items": { "type": "array", "description": "Ítems con tipo de vidrio, medidas y cálculos" },
+        "subtotalCalculado": { "type": "number", "description": "Suma de los subtotales de ítems" },
+        "precioMinimoAplicado": { "type": "boolean", "description": "Si se aplicó el cobro mínimo de servicio" },
+        "totalFinal": { "type": "number", "description": "Total final del presupuesto" },
+        "estado": { "type": "string", "enum": ["pendiente", "enviado", "aceptado", "rechazado"], "description": "Estado del presupuesto" },
+        "notasVoz": { "type": "string", "description": "Transcripción de voz original" },
+        "creadoEn": { "type": "string", "description": "Timestamp ISO" },
+        "actualizadoEn": { "type": "string", "description": "Timestamp ISO" }
+      },
+      "required": ["clienteNombre", "fecha", "items", "totalFinal", "estado"]
+    },
+    "Resena": {
+      "title": "Resena",
+      "description": "Reseña del cliente con calificación 1-5, comentario obligatorio si <= 3 y derivación a Google Maps",
+      "type": "object",
+      "properties": {
+        "clienteId": { "type": "string", "description": "ID del cliente" },
+        "clienteNombre": { "type": "string", "description": "Nombre del cliente" },
+        "negocioId": { "type": "string", "description": "ID del negocio vidriero" },
+        "calificacion": { "type": "number", "description": "Calificación numérica del 1 al 5" },
+        "comentario": { "type": "string", "description": "Comentario u opinión (obligatorio si <= 3)" },
+        "fecha": { "type": "string", "description": "Timestamp ISO de la reseña" },
+        "turnoId": { "type": "string", "description": "ID del turno asociado si aplica" },
+        "derivadoAGoogle": { "type": "boolean", "description": "Si hizo clic para dejar reseña en Google Maps" },
+        "esSandbox": { "type": "boolean", "description": "Indica si la reseña fue creada en modo sandbox/prueba" }
+      },
+      "required": ["clienteId", "negocioId", "calificacion", "fecha"]
+    },
+    "ModoSandbox": {
+      "title": "ModoSandbox",
+      "description": "Estado global del modo sandbox / pruebas en la plataforma",
+      "type": "object",
+      "properties": {
+        "activo": { "type": "boolean", "description": "Indica si el modo sandbox está encendido" },
+        "actualizadoEn": { "type": "string", "description": "Timestamp ISO de la última modificación" },
+        "actualizadoPor": { "type": "string", "description": "Email o identificador del SuperAdmin que modificó el estado" }
+      },
+      "required": ["activo"]
+    },
+    "EmailSimulado": {
+      "title": "EmailSimulado",
+      "description": "Registro de emails simulados generados en modo sandbox",
+      "type": "object",
+      "properties": {
+        "tipoDeEmail": { "type": "string", "description": "Tipo de email simulado (confirmación, cancelación, etc.)" },
+        "destinatario": { "type": "string", "description": "Dirección de correo destinataria" },
+        "asunto": { "type": "string", "description": "Asunto del mensaje" },
+        "cuerpo": { "type": "string", "description": "Cuerpo del correo electrónico" },
+        "fecha": { "type": "string", "description": "Timestamp ISO del momento de simulación" },
+        "negocioId": { "type": "string", "description": "Identificador del negocio" },
+        "turnoId": { "type": "string", "description": "Identificador de turno asociado" }
+      },
+      "required": ["tipoDeEmail", "destinatario", "asunto", "cuerpo", "fecha"]
+    }
+  },
+  "firestore": {
+    "/modoSandbox/{docId}": {
+      "schema": "ModoSandbox",
+      "description": "Configuración del estado del modo sandbox"
+    },
+    "/emailsSimulados/{emailId}": {
+      "schema": "EmailSimulado",
+      "description": "Bandeja de auditoría de emails simulados en modo sandbox"
+    },
+    "/reseñas/{resenaId}": {
+      "schema": "Resena",
+      "description": "Colección de reseñas y calificaciones de clientes"
+    },
+    "/clientes/{clienteId}": {
+      "schema": "Cliente",
+      "description": "Colección de clientes y fichas de servicio"
+    },
+    "/clientes/{clienteId}/sellosHistorial/{selloId}": {
+      "schema": "SelloHistorial",
+      "description": "Historial inmutable de sellos otorgados al cliente"
+    },
+    "/turnos/{turnoId}": {
+      "schema": "Turno",
+      "description": "Colección de turnos y citas agendadas públicamente"
+    },
+    "/configuracion/{docId}": {
+      "schema": "BusinessConfig",
+      "description": "Configuración general del negocio"
+    },
+    "/tarifas/{docId}": {
+      "schema": "TarifasConfig",
+      "description": "Tarifas base por m2 y cobro mínimo de servicio"
+    },
+    "/plantillasPresupuesto/{plantillaId}": {
+      "schema": "PlantillaPresupuesto",
+      "description": "Plantillas reutilizables para presupuestos frecuentes"
+    },
+    "/presupuestos/{presupuestoId}": {
+      "schema": "Presupuesto",
+      "description": "Historial de cotizaciones generadas"
+    },
+    "/agenda/{citaId}": {
+      "schema": "object",
+      "description": "Citas y visitas programadas en la agenda"
+    },
+    "/fidelidad/{fidelidadId}": {
+      "schema": "object",
+      "description": "Puntos y fidelidad de clientes"
+    }
+  }
+}

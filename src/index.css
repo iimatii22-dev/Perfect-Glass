@@ -1,0 +1,79 @@
+@import "tailwindcss";
+
+:root {
+  --primary-color: #0284c7;
+  --primary-hover: #0369a1;
+  --primary-dark: #075985;
+  --primary-light: rgba(2, 132, 199, 0.1);
+  --primary-border: rgba(2, 132, 199, 0.25);
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+
+/* Dynamic Primary Color Helpers */
+.bg-brand-primary {
+  background-color: var(--primary-color);
+}
+
+.text-brand-primary {
+  color: var(--primary-color);
+}
+
+.border-brand-primary {
+  border-color: var(--primary-color);
+}
+
+.bg-brand-light {
+  background-color: var(--primary-light);
+}
+
+.border-brand-light {
+  border-color: var(--primary-border);
+}
+
+/* iOS & Android Safe Area Padding Utilities */
+.pb-safe {
+  padding-bottom: max(env(safe-area-inset-bottom, 16px), 16px);
+}
+
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+/* Standardized interactive button micro-interaction */
+.btn-press {
+  transition: transform 0.15s ease, opacity 0.15s ease, background-color 0.15s ease;
+}
+.btn-press:active {
+  transform: scale(0.96);
+}
+
+/* Focus outline styles for accessibility */
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
+}
+
+/* Custom subtle scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}

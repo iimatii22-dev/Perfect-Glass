@@ -1,0 +1,88 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Configuración del negocio (lectura y escritura para personalización y branding)
+    match /configuracion/{docId} {
+      allow read, write: if true;
+    }
+
+    // Tarifas y precios base
+    match /tarifas/{docId} {
+      allow read, write: if true;
+    }
+
+    // Plantillas de presupuestos reutilizables
+    match /plantillasPresupuesto/{plantillaId} {
+      allow read, write: if true;
+    }
+
+    // Historial de presupuestos y cotizaciones
+    match /presupuestos/{presupuestoId} {
+      allow read, write: if true;
+    }
+    
+    // Clientes y fichas técnicas
+    match /clientes/{clienteId} {
+      allow read, write: if true;
+
+      // Subcolección de sellos otorgados
+      match /sellosHistorial/{selloId} {
+        allow read, write: if true;
+      }
+    }
+    
+    // Cola de emails (Firebase Extensions Trigger Email)
+    match /mail/{mailId} {
+      allow read, write: if true;
+    }
+
+    // Turnos de auto-agendamiento público
+    match /turnos/{turnoId} {
+      allow read, write: if true;
+    }
+    
+    // Agenda interna del vidriero
+    match /agenda/{docId} {
+      allow read, write: if true;
+    }
+    
+    // Fidelidad
+    match /fidelidad/{docId} {
+      allow read, write: if true;
+    }
+
+    // Reseñas de clientes
+    match /reseñas/{resenaId} {
+      allow read, write: if true;
+    }
+    match /resenas/{resenaId} {
+      allow read, write: if true;
+    }
+
+    // Modo Sandbox y configuración de prueba
+    match /modoSandbox/{docId} {
+      allow read, write: if true;
+    }
+
+    // Registro de emails simulados en modo sandbox
+    match /emailsSimulados/{emailId} {
+      allow read, write: if true;
+    }
+
+    // Fallback default
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}
+

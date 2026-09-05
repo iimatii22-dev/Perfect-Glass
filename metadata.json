@@ -1,0 +1,6 @@
+{
+  "name": "Perfect Glass",
+  "description": "PWA de gestión para el negocio de limpieza de vidrios Perfect Glass",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
