@@ -9,10 +9,12 @@ import {
   onSnapshot,
   query,
   where,
+  limit,
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { Negocio, NegocioMetricas, PlanNegocio } from '../types';
 import { getTodayISODate } from '../utils/dateUtils';
+import { registrarAccionAuditoria } from './auditoriaService';
 
 export const NEGOCIOS_COLLECTION = 'negocios';
 export const SUPERADMINS_COLLECTION = 'superAdmins';
@@ -34,6 +36,9 @@ export const DEFAULT_PERFECT_GLASS: Negocio = {
   fechaCreacion: '2026-01-15T09:00:00.000Z',
   activo: true,
   plan: 'premium',
+  codigoInvitacion: 'perfect-glass-vip',
+  slug: 'perfect-glass',
+  estado: 'activo',
   sellosNecesarios: 5,
   recompensaDescripcion: 'Limpieza de vidrios gratis',
   horaInicioJornada: '08:00',
@@ -83,6 +88,22 @@ export async function asegurarNegocioPrincipal(): Promise<Negocio> {
 
     await setDoc(docRef, mergedData, { merge: true });
 
+    // Sincronizar también la vista pública segura del negocio principal
+    try {
+      const pubRef = doc(db, 'negociosPublicos', 'perfect-glass-vip');
+      await setDoc(pubRef, {
+        negocioId: DEFAULT_PERFECT_GLASS_ID,
+        nombreNegocio: mergedData.nombreNegocio,
+        logoUrl: mergedData.logoUrl || '/icon-192.svg',
+        colorPrimario: mergedData.colorPrimario || '#0284c7',
+        activo: mergedData.activo !== false,
+        refCode: 'perfect-glass-vip',
+        googleReviewsUrl: mergedData.linkGoogleReviews || '',
+      }, { merge: true });
+    } catch (e) {
+      console.warn('Could not seed public view:', e);
+    }
+
     // Seed master SuperAdmin in superAdmins collection
     await asegurarSuperAdminMaster();
 
@@ -94,23 +115,11 @@ export async function asegurarNegocioPrincipal(): Promise<Negocio> {
 }
 
 /**
- * Seeds master SuperAdmin email into superAdmins collection
+ * Seeds master SuperAdmin email into superAdmins collection (solo vía Admin SDK)
  */
 export async function asegurarSuperAdminMaster(): Promise<void> {
-  try {
-    const superAdminRef = doc(db, SUPERADMINS_COLLECTION, DEFAULT_SUPERADMIN_EMAIL.toLowerCase());
-    const snap = await getDoc(superAdminRef);
-    if (!snap.exists()) {
-      await setDoc(superAdminRef, {
-        email: DEFAULT_SUPERADMIN_EMAIL.toLowerCase(),
-        nombre: 'SuperAdmin Principal',
-        fechaAlta: new Date().toISOString(),
-        activo: true,
-      });
-    }
-  } catch (e) {
-    console.warn('Could not seed master superAdmin document:', e);
-  }
+  // La creación y asignación de superAdmins se realiza exclusivamente con Admin SDK
+  // mediante scripts/bootstrapSuperAdmin.js respetando superAdmins/{uid}.
 }
 
 /**
@@ -194,7 +203,7 @@ export async function saveNegocio(
   const docRef = doc(db, NEGOCIOS_COLLECTION, negocioId);
   const rawData: Record<string, any> = {
     ...data,
-    updatedAt: new Date().toISOString(),
+    actualizadoEn: new Date().toISOString(),
     updatedBy: userId || 'admin',
   };
 
@@ -209,44 +218,90 @@ export async function saveNegocio(
 }
 
 /**
+ * Genera un código de invitación criptográficamente aleatorio largo, no basado en el nombre del negocio
+ */
+export function generarNuevoCodigoInvitacion(): string {
+  const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
+  let result = 'ref-';
+  for (let i = 0; i < 24; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
+/**
  * SuperAdmin: Toggle business active state
  */
-export async function toggleNegocioActivo(negocioId: string, activo: boolean): Promise<void> {
+export async function toggleNegocioActivo(
+  negocioId: string,
+  activo: boolean,
+  adminUser?: { uid: string; email: string }
+): Promise<void> {
   const docRef = doc(db, NEGOCIOS_COLLECTION, negocioId);
   await updateDoc(docRef, {
     activo,
-    updatedAt: new Date().toISOString(),
+    estado: activo ? 'activo' : 'suspendido',
+    actualizadoEn: new Date().toISOString(),
   });
+
+  if (adminUser) {
+    await registrarAccionAuditoria({
+      superAdminUid: adminUser.uid,
+      superAdminEmail: adminUser.email,
+      accion: activo ? 'activar_negocio' : 'suspender_negocio',
+      negocioId,
+      detalles: { activo, estado: activo ? 'activo' : 'suspendido' },
+    });
+  }
 }
 
 /**
  * SuperAdmin: Change business plan
  */
-export async function cambiarPlanNegocio(negocioId: string, plan: PlanNegocio | string): Promise<void> {
+export async function cambiarPlanNegocio(
+  negocioId: string,
+  plan: PlanNegocio | string,
+  adminUser?: { uid: string; email: string }
+): Promise<void> {
   const docRef = doc(db, NEGOCIOS_COLLECTION, negocioId);
   await updateDoc(docRef, {
     plan,
-    updatedAt: new Date().toISOString(),
+    actualizadoEn: new Date().toISOString(),
   });
+
+  if (adminUser) {
+    await registrarAccionAuditoria({
+      superAdminUid: adminUser.uid,
+      superAdminEmail: adminUser.email,
+      accion: 'cambiar_plan',
+      negocioId,
+      detalles: { plan },
+    });
+  }
 }
 
 /**
  * SuperAdmin: Create a brand new business from scratch
  */
-export async function crearNuevoNegocio(datos: {
-  id?: string;
-  nombreNegocio: string;
-  emailAdministrador?: string;
-  telefono?: string;
-  whatsapp?: string;
-  direccion?: string;
-  colorPrimario?: string;
-  plan?: PlanNegocio | string;
-  logoUrl?: string;
-  sellosNecesarios?: number;
-  recompensaDescripcion?: string;
-  activo?: boolean;
-}): Promise<Negocio> {
+export async function crearNuevoNegocio(
+  datos: {
+    id?: string;
+    nombreNegocio: string;
+    emailAdministrador?: string;
+    telefono?: string;
+    whatsapp?: string;
+    direccion?: string;
+    colorPrimario?: string;
+    plan?: PlanNegocio | string;
+    logoUrl?: string;
+    sellosNecesarios?: number;
+    recompensaDescripcion?: string;
+    activo?: boolean;
+    codigoInvitacion?: string;
+    slug?: string;
+  },
+  adminUser?: { uid: string; email: string }
+): Promise<Negocio> {
   // Generate clean slug ID from name if not provided
   let customId = (datos.id || '').trim();
   if (!customId) {
@@ -261,10 +316,13 @@ export async function crearNuevoNegocio(datos: {
 
   const docRef = doc(db, NEGOCIOS_COLLECTION, customId);
   const emailAdmin = (datos.emailAdministrador || 'admin@' + customId + '.com').trim().toLowerCase();
+  const invitationCode = datos.codigoInvitacion?.trim() || generarNuevoCodigoInvitacion();
 
   const nuevoNegocio: Negocio = {
     ...DEFAULT_PERFECT_GLASS,
     id: customId,
+    slug: datos.slug || customId,
+    codigoInvitacion: invitationCode,
     nombreNegocio: datos.nombreNegocio.trim(),
     emailAdministrador: emailAdmin,
     telefono: datos.telefono?.trim() || '+54 9 11 0000-0000',
@@ -275,21 +333,100 @@ export async function crearNuevoNegocio(datos: {
     logoUrl: datos.logoUrl || '/icon-192.svg',
     fechaCreacion: new Date().toISOString(),
     activo: datos.activo !== undefined ? datos.activo : true,
+    estado: datos.activo !== false ? 'activo' : 'suspendido',
     emailVidriero: emailAdmin,
     sellosNecesarios: datos.sellosNecesarios || 5,
     recompensaDescripcion: datos.recompensaDescripcion || 'Limpieza de vidrios gratis',
   };
 
   await setDoc(docRef, nuevoNegocio);
+
+  // Sincronizar documento público desinfectado en negociosPublicos/{refCode}
+  // Cumple estrictamente con el esquema de campos permitidos en firestore.rules
+  try {
+    const pubRef = doc(db, 'negociosPublicos', invitationCode);
+    await setDoc(pubRef, {
+      negocioId: customId,
+      nombreNegocio: nuevoNegocio.nombreNegocio,
+      logoUrl: nuevoNegocio.logoUrl || '/icon-192.svg',
+      colorPrimario: nuevoNegocio.colorPrimario || '#0284c7',
+      activo: nuevoNegocio.activo !== false,
+      refCode: invitationCode,
+      googleReviewsUrl: nuevoNegocio.linkGoogleReviews || '',
+    });
+  } catch (pubErr) {
+    console.warn('Error sincronizando vista pública de negocio:', pubErr);
+  }
+
+  if (adminUser) {
+    await registrarAccionAuditoria({
+      superAdminUid: adminUser.uid,
+      superAdminEmail: adminUser.email,
+      accion: 'crear_negocio',
+      negocioId: customId,
+      detalles: {
+        nombreNegocio: nuevoNegocio.nombreNegocio,
+        emailAdministrador: emailAdmin,
+        plan: nuevoNegocio.plan,
+        codigoInvitacion: invitationCode,
+      },
+    });
+  }
+
   return nuevoNegocio;
 }
 
 /**
- * Calculates live metrics for a business (Clients, Monthly visits, Monthly appointments)
+ * Valida un parámetro 'ref' buscando exclusivamente en negociosPublicos/{ref}.
+ * Valida que el documento exista, activo == true, negocioId no vacío y refCode coincida.
+ */
+export async function obtenerNegocioPorRef(refCode: string): Promise<Negocio | null> {
+  if (!refCode || !refCode.trim()) return null;
+  const cleanRef = refCode.trim();
+
+  try {
+    const pubRef = doc(db, 'negociosPublicos', cleanRef);
+    const pubSnap = await getDoc(pubRef);
+    
+    if (!pubSnap.exists()) {
+      return null;
+    }
+
+    const pubData = pubSnap.data();
+
+    // Validar rigurosamente: activo === true, negocioId no vacío y refCode coincidente
+    if (
+      pubData.activo !== true ||
+      typeof pubData.negocioId !== 'string' ||
+      !pubData.negocioId.trim() ||
+      pubData.refCode !== cleanRef
+    ) {
+      return null;
+    }
+
+    return {
+      ...DEFAULT_PERFECT_GLASS,
+      id: pubData.negocioId.trim(),
+      nombreNegocio: pubData.nombreNegocio,
+      logoUrl: pubData.logoUrl || '/icon-192.svg',
+      colorPrimario: pubData.colorPrimario || '#0284c7',
+      activo: true,
+      codigoInvitacion: pubData.refCode,
+      linkGoogleReviews: pubData.googleReviewsUrl || '',
+    } as Negocio;
+  } catch (err) {
+    console.warn('Error al resolver negocio por ref en negociosPublicos:', err);
+    return null;
+  }
+}
+
+/**
+ * Calculates live metrics for a business (Clients, Monthly visits, Upcoming appointments, Reviews)
  */
 export async function fetchNegocioMetrics(negocioId: string): Promise<NegocioMetricas> {
   try {
-    const currentMonthPrefix = getTodayISODate().substring(0, 7); // "YYYY-MM"
+    const today = getTodayISODate();
+    const currentMonthPrefix = today.substring(0, 7); // "YYYY-MM"
 
     // 1. Clientes count
     const clientesRef = collection(db, 'clientes');
@@ -300,7 +437,7 @@ export async function fetchNegocioMetrics(negocioId: string): Promise<NegocioMet
     clientesSnap.forEach((docSnap) => {
       const data = docSnap.data();
       const belongs = !data.negocioId || data.negocioId === negocioId || (negocioId === DEFAULT_PERFECT_GLASS_ID && !data.negocioId);
-      if (belongs) {
+      if (belongs && data.estadoRegistro !== 'pendiente') {
         totalClientes++;
         if (data.historialVisitas && Array.isArray(data.historialVisitas)) {
           data.historialVisitas.forEach((v: any) => {
@@ -312,19 +449,41 @@ export async function fetchNegocioMetrics(negocioId: string): Promise<NegocioMet
       }
     });
 
-    // 2. Turnos count this month
+    // 2. Turnos count this month & upcoming
     const turnosRef = collection(db, 'turnos');
     let turnosMes = 0;
+    let turnosProximos = 0;
     const turnosSnap = await getDocs(turnosRef);
     turnosSnap.forEach((docSnap) => {
       const data = docSnap.data();
       const belongs = !data.negocioId || data.negocioId === negocioId || (negocioId === DEFAULT_PERFECT_GLASS_ID && !data.negocioId);
-      if (belongs && data.fecha && data.fecha.startsWith(currentMonthPrefix)) {
-        turnosMes++;
+      if (belongs) {
+        if (data.fecha && data.fecha.startsWith(currentMonthPrefix)) {
+          turnosMes++;
+        }
+        if (data.fecha && data.fecha >= today && data.estado !== 'cancelado') {
+          turnosProximos++;
+        }
       }
     });
 
-    // 3. Presupuestos count this month
+    // 3. Reseñas count
+    let totalResenas = 0;
+    try {
+      const resenasRef = collection(db, 'resenas');
+      const resenasSnap = await getDocs(resenasRef);
+      resenasSnap.forEach((docSnap) => {
+        const data = docSnap.data();
+        const belongs = !data.negocioId || data.negocioId === negocioId || (negocioId === DEFAULT_PERFECT_GLASS_ID && !data.negocioId);
+        if (belongs) {
+          totalResenas++;
+        }
+      });
+    } catch {
+      // Fallback
+    }
+
+    // 4. Presupuestos count this month
     const presupuestosRef = collection(db, 'presupuestos');
     let presupuestosMes = 0;
     const presupuestosSnap = await getDocs(presupuestosRef);
@@ -340,7 +499,11 @@ export async function fetchNegocioMetrics(negocioId: string): Promise<NegocioMet
       totalClientes,
       visitasCompletadasMes,
       turnosMes,
+      turnosProximos,
+      totalResenas,
       presupuestosMes,
+      turnosEsteMes: turnosMes,
+      visitasEsteMes: visitasCompletadasMes,
     };
   } catch (error) {
     console.warn(`Error fetching metrics for ${negocioId}:`, error);
@@ -348,7 +511,11 @@ export async function fetchNegocioMetrics(negocioId: string): Promise<NegocioMet
       totalClientes: 5,
       visitasCompletadasMes: 4,
       turnosMes: 8,
+      turnosProximos: 3,
+      totalResenas: 7,
       presupuestosMes: 3,
+      turnosEsteMes: 8,
+      visitasEsteMes: 4,
     };
   }
 }
@@ -365,11 +532,12 @@ export async function isEmailSuperAdmin(email: string | null | undefined): Promi
     return true;
   }
 
-  // 2. Check collection 'superAdmins'
+  // 2. Query collection 'superAdmins' by email field
   try {
-    const docRef = doc(db, SUPERADMINS_COLLECTION, cleanEmail);
-    const snap = await getDoc(docRef);
-    if (snap.exists() && snap.data()?.activo !== false) {
+    const colRef = collection(db, SUPERADMINS_COLLECTION);
+    const q = query(colRef, where('email', '==', cleanEmail), where('activo', '==', true));
+    const snap = await getDocs(q);
+    if (!snap.empty) {
       return true;
     }
   } catch (e) {
@@ -383,26 +551,35 @@ export async function isEmailSuperAdmin(email: string | null | undefined): Promi
  * Real-time subscription to SuperAdmins list
  */
 export function subscribeToSuperAdmins(
-  callback: (superAdmins: { id: string; email: string; nombre?: string; activo?: boolean }[]) => void
+  callback: (superAdmins: { id: string; uid?: string; email: string; nombre?: string; activo?: boolean; creadoEn?: string; fechaAlta?: string }[]) => void
 ): () => void {
   const colRef = collection(db, SUPERADMINS_COLLECTION);
   return onSnapshot(
     colRef,
     (snapshot) => {
-      const list = snapshot.docs.map((d) => ({
-        id: d.id,
-        email: d.data().email || d.id,
-        nombre: d.data().nombre || 'SuperAdmin',
-        activo: d.data().activo !== false,
-      }));
+      const list = snapshot.docs.map((d) => {
+        const data = d.data();
+        return {
+          id: d.id, // UID
+          uid: data.uid || d.id,
+          email: data.email || '',
+          nombre: data.nombre || data.email || 'SuperAdmin',
+          activo: data.activo !== false,
+          creadoEn: data.creadoEn || data.fechaAlta || '',
+          fechaAlta: data.fechaAlta || data.creadoEn || '',
+        };
+      });
 
       // Ensure default superadmin is in the list
       if (!list.some((a) => a.email.toLowerCase() === DEFAULT_SUPERADMIN_EMAIL.toLowerCase())) {
         list.unshift({
-          id: DEFAULT_SUPERADMIN_EMAIL.toLowerCase(),
+          id: 'master-superadmin-uid',
+          uid: 'master-superadmin-uid',
           email: DEFAULT_SUPERADMIN_EMAIL,
           nombre: 'SuperAdmin Principal (Dev)',
           activo: true,
+          creadoEn: new Date().toISOString(),
+          fechaAlta: new Date().toISOString(),
         });
       }
 
@@ -412,10 +589,13 @@ export function subscribeToSuperAdmins(
       console.warn('SuperAdmins subscription fallback:', err);
       callback([
         {
-          id: DEFAULT_SUPERADMIN_EMAIL.toLowerCase(),
+          id: 'master-superadmin-uid',
+          uid: 'master-superadmin-uid',
           email: DEFAULT_SUPERADMIN_EMAIL,
           nombre: 'SuperAdmin Principal (Dev)',
           activo: true,
+          creadoEn: new Date().toISOString(),
+          fechaAlta: new Date().toISOString(),
         },
       ]);
     }

@@ -20,6 +20,7 @@ interface AgendaTurnoCardProps {
   key?: React.Key;
   turno: Turno;
   onCompletar: (turnoId: string) => void;
+  onConfirmar?: (turnoId: string) => void;
   onCancelar: (turno: Turno) => void;
   onSelect?: (turno: Turno) => void;
 }
@@ -27,6 +28,7 @@ interface AgendaTurnoCardProps {
 export function AgendaTurnoCard({
   turno,
   onCompletar,
+  onConfirmar,
   onCancelar,
   onSelect,
 }: AgendaTurnoCardProps) {
@@ -80,8 +82,13 @@ export function AgendaTurnoCard({
                 <CheckCircle2 className="w-3 h-3 text-emerald-600" />
                 <span>Completado</span>
               </span>
+            ) : turno.estado === 'pendiente' ? (
+              <span className="px-2 py-0.5 rounded-lg bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-black uppercase flex items-center gap-1 shadow-2xs">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                <span>Pendiente</span>
+              </span>
             ) : (
-              <span className="px-2 py-0.5 rounded-lg bg-amber-100 text-amber-900 text-[10px] font-extrabold uppercase">
+              <span className="px-2 py-0.5 rounded-lg bg-sky-100 text-sky-900 text-[10px] font-extrabold uppercase">
                 Confirmado
               </span>
             )}
@@ -149,6 +156,21 @@ export function AgendaTurnoCard({
         {/* Status Actions */}
         {!isCancelado && !isCompletado && (
           <div className="flex items-center gap-1.5">
+            {turno.estado === 'pendiente' && onConfirmar && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onConfirmar(turno.id);
+                }}
+                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1 shadow-2xs transition-colors"
+                title="Confirmar reserva"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Confirmar</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={(e) => {

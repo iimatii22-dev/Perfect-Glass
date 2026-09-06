@@ -1,7 +1,7 @@
 {
-  "name": "Perfect Glass - Gestión de Limpieza",
-  "short_name": "Perfect Glass",
-  "description": "App de gestión para negocio de limpieza de vidrios",
+  "name": "Gestión de Servicios",
+  "short_name": "Gestión",
+  "description": "Plataforma de Gestión de Servicios y Portal de Fidelidad",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",

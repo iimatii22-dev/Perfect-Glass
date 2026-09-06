@@ -141,7 +141,7 @@ export async function guardarResena(datos: {
       await updateDoc(clienteDocRef, {
         ultimaResenaEnviada: nowIso,
         ultimoPedidoResena: getTodayISODate(),
-        updatedAt: nowIso,
+        actualizadoEn: nowIso,
       });
     } catch (err) {
       console.warn('No se pudo actualizar ultimaResenaEnviada en cliente:', err);
@@ -161,7 +161,7 @@ export async function actualizarDerivadoAGoogle(resenaId: string, clienteId?: st
     const docRef = doc(db, RESENAS_COLLECTION, resenaId);
     await updateDoc(docRef, {
       derivadoAGoogle: true,
-      updatedAt: new Date().toISOString(),
+      actualizadoEn: new Date().toISOString(),
     });
   } catch (err) {
     console.warn('Error al actualizar derivadoAGoogle en reseña:', err);

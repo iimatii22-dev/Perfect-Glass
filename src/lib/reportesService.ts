@@ -194,7 +194,7 @@ export function calcularReportes(
   clientes.forEach((c) => {
     if (c.historialVisitas && c.historialVisitas.length > 0) {
       c.historialVisitas.forEach((v) => {
-        const vDateKey = getMonthKey(v.fecha) || getMonthKey(v.createdAt);
+        const vDateKey = getMonthKey(v.fecha) || getMonthKey(v.creadoEn);
         if (vDateKey && monthBuckets[vDateKey]) {
           monthBuckets[vDateKey].visitas += 1;
         }

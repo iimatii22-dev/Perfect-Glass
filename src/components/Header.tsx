@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { TabType } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
+import { NotificacionesBell } from './notificaciones/NotificacionesBell';
 
 interface HeaderProps {
   activeTab: TabType;
@@ -197,6 +198,16 @@ export function Header({ activeTab, setActiveTab, onOpenBooking, onOpenSuperAdmi
 
           {/* Right: TOP-RIGHT HAMBURGER DROPDOWN TRIGGER & QUICK ACTIONS */}
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 relative" ref={menuRef}>
+            {/* Campana de Notificaciones Internas */}
+            <NotificacionesBell
+              usuarioUid={user?.uid || (user?.isDemo ? 'demo-admin-uid-123' : null)}
+              onNavegarATurno={(_turnoId) => {
+                if (setActiveTab) {
+                  setActiveTab('agenda');
+                }
+              }}
+            />
+
             {/* Quick Public Booking Preview Button (Desktop) */}
             {onOpenBooking && (
               <button

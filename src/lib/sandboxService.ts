@@ -362,8 +362,8 @@ export async function simularCrearClientePrueba(
     recompensaDescripcion: 'Limpieza de frente y marquesina gratis',
     recompensaDisponible: false,
     esSandbox: true,
-    createdAt: nowIso,
-    updatedAt: nowIso,
+    creadoEn: nowIso,
+    actualizadoEn: nowIso,
   };
 
   const docRef = doc(db, 'clientes', id);
@@ -387,7 +387,7 @@ export async function simularAprobarClientePrueba(
   const nowIso = new Date().toISOString();
   await updateDoc(docRef, {
     estadoRegistro: 'aprobado',
-    updatedAt: nowIso,
+    actualizadoEn: nowIso,
   });
 
   const updatedSnap = await getDoc(docRef);
@@ -470,7 +470,7 @@ export async function simularMarcarVisitaPrueba(
     fechaProximaVisita: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
       .toISOString()
       .split('T')[0],
-    updatedAt: nowIso,
+    actualizadoEn: nowIso,
   });
 
   // Guardar subcolección de sellos

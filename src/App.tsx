@@ -14,7 +14,9 @@ import { PublicBookingPage } from './components/public/PublicBookingPage';
 import { PWAInstallPrompt } from './components/PWAInstallPrompt';
 import { SuperAdminDashboard } from './components/superadmin/SuperAdminDashboard';
 import { SuperAdminBanner } from './components/superadmin/SuperAdminBanner';
-import { DemoPage } from './components/superadmin/DemoPage';
+import { SuperAdminDemoPage } from './components/superadmin/SuperAdminDemoPage';
+import { PublicClienteRegisterPage } from './components/public/PublicClienteRegisterPage';
+import { AccountStatusScreen } from './components/AccountStatusScreen';
 import { TabType } from './types';
 import { motion, AnimatePresence } from 'motion/react';
 import { Sparkles, ShieldAlert } from 'lucide-react';
@@ -28,7 +30,7 @@ import {
 } from './lib/pushNotificationService';
 
 function AppContent() {
-  const { user, isCliente, isAdmin, isSuperAdmin, loading: authLoading } = useAuth();
+  const { user, isCliente, isAdmin, isSuperAdmin, estadoUsuario, loading: authLoading } = useAuth();
   const { config, loading: configLoading, currentNegocioId, setCurrentNegocioId } = useConfig();
   const [activeTab, setActiveTab] = useState<TabType>('agenda');
   const [isPublicMode, setIsPublicMode] = useState(false);
@@ -38,9 +40,21 @@ function AppContent() {
   const [opinionIdentifier, setOpinionIdentifier] = useState<string | null>(null);
   const [isCancellationMode, setIsCancellationMode] = useState(false);
   const [cancellationCurrentToken, setCancellationCurrentToken] = useState<string | null>(null);
+  const [cancellationCurrentTurnoId, setCancellationCurrentTurnoId] = useState<string | null>(null);
+  const [isRegisterClientMode, setIsRegisterClientMode] = useState(false);
+  const [registerClientRef, setRegisterClientRef] = useState<string | null>(null);
   const [isDemoMode, setIsDemoMode] = useState(false);
   const [viewingSuperAdminDashboard, setViewingSuperAdminDashboard] = useState(true);
   const [showPushModal, setShowPushModal] = useState(false);
+  const [splashDismissed, setSplashDismissed] = useState(false);
+
+  // Garantizar que la pantalla de bienvenida no quede bloqueada indefinidamente
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSplashDismissed(true);
+    }, 700);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Sync SuperAdmin state if login changes
   useEffect(() => {
@@ -125,8 +139,19 @@ function AppContent() {
       setActiveTab(tabParam as TabType);
     }
     
-    // Check for demo console (/demo or ?demo=true)
-    const isDemoPath = pathname === '/demo' || pathname.startsWith('/demo');
+    // Check for client public registration (/registro-cliente or ?registro-cliente=true)
+    const isRegisterClientPath = pathname === '/registro-cliente' || pathname.startsWith('/registro-cliente');
+    const refParam = params.get('ref') || params.get('codigo') || params.get('negocio');
+    if (isRegisterClientPath || params.has('registro-cliente')) {
+      setIsRegisterClientMode(true);
+      if (refParam) {
+        setRegisterClientRef(refParam);
+      }
+      return;
+    }
+
+    // Check for demo console (/superadmin/demo or /demo or ?demo=true)
+    const isDemoPath = pathname === '/superadmin/demo' || pathname === '/demo' || pathname.startsWith('/superadmin/demo');
     const demoParam = params.get('demo');
     if (isDemoPath || demoParam === 'true') {
       setIsDemoMode(true);
@@ -151,6 +176,10 @@ function AppContent() {
       }
       if (tok && tok !== 'true') {
         setCancellationCurrentToken(tok);
+      }
+      const tId = params.get('turno') || params.get('turnoId') || '';
+      if (tId) {
+        setCancellationCurrentTurnoId(tId);
       }
       return;
     }
@@ -199,6 +228,7 @@ function AppContent() {
     return (
       <PublicCancelacionPage
         token={cancellationCurrentToken || ''}
+        turnoId={cancellationCurrentTurnoId || undefined}
         config={config}
         onBackToApp={() => {
           window.history.replaceState({}, '', '/');
@@ -213,11 +243,24 @@ function AppContent() {
     );
   }
 
+  // PUBLIC CLIENT REGISTRATION VIEW (/registro-cliente?ref=...)
+  if (isRegisterClientMode) {
+    return (
+      <PublicClienteRegisterPage
+        initialRef={registerClientRef || undefined}
+        onBackToLogin={() => {
+          window.history.replaceState({}, '', '/');
+          setIsRegisterClientMode(false);
+        }}
+      />
+    );
+  }
+
   // Splash Loading Screen
-  if (configLoading || (authLoading && !isPublicMode)) {
+  if (!splashDismissed && (configLoading || (authLoading && !isPublicMode))) {
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4">
-        <div className="flex flex-col items-center space-y-4 animate-pulse text-center">
+        <div className="flex flex-col items-center space-y-4 text-center">
           <div
             className="w-16 h-16 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-sky-500/20"
             style={{ backgroundColor: config.colorPrimario || '#0284c7' }}
@@ -243,6 +286,13 @@ function AppContent() {
             <div className="w-2 h-2 rounded-full bg-sky-400 animate-bounce" style={{ animationDelay: '150ms' }}></div>
             <div className="w-2 h-2 rounded-full bg-sky-400 animate-bounce" style={{ animationDelay: '300ms' }}></div>
           </div>
+          <button
+            type="button"
+            onClick={() => setSplashDismissed(true)}
+            className="mt-2 text-xs text-sky-400/80 hover:text-sky-300 underline transition-colors"
+          >
+            Ingresar a la aplicación
+          </button>
         </div>
       </div>
     );
@@ -303,7 +353,7 @@ function AppContent() {
           isViewingSuperAdminDashboard={false}
           onOpenDemo={() => setIsDemoMode(true)}
         />
-        <DemoPage
+        <SuperAdminDemoPage
           onBackToDashboard={() => {
             window.history.replaceState({}, '', '/');
             setIsDemoMode(false);
@@ -334,6 +384,12 @@ function AppContent() {
     );
   }
 
+  // USER STATUS RESTRICTION (Pendiente or Suspendido)
+  // SuperAdmins are exempt from status restrictions
+  if (!isSuperAdmin && (estadoUsuario === 'suspendido' || estadoUsuario === 'pendiente')) {
+    return <AccountStatusScreen status={estadoUsuario} />;
+  }
+
   // CLIENT PORTAL (When logged in as Cliente)
   if (isCliente) {
     return (
@@ -358,7 +414,7 @@ function AppContent() {
           onGoToSuperAdmin={() => setViewingSuperAdminDashboard(true)}
           isViewingSuperAdminDashboard={true}
           onOpenDemo={() => {
-            window.history.pushState({}, '', '/demo');
+            window.history.pushState({}, '', '/superadmin/demo');
             setIsDemoMode(true);
           }}
         />
@@ -368,7 +424,7 @@ function AppContent() {
             setViewingSuperAdminDashboard(false);
           }}
           onOpenDemo={() => {
-            window.history.pushState({}, '', '/demo');
+            window.history.pushState({}, '', '/superadmin/demo');
             setIsDemoMode(true);
           }}
         />
@@ -385,7 +441,7 @@ function AppContent() {
           onGoToSuperAdmin={() => setViewingSuperAdminDashboard(true)}
           isViewingSuperAdminDashboard={false}
           onOpenDemo={() => {
-            window.history.pushState({}, '', '/demo');
+            window.history.pushState({}, '', '/superadmin/demo');
             setIsDemoMode(true);
           }}
         />

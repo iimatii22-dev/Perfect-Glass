@@ -35,6 +35,7 @@ import { ClienteCard } from '../clientes/ClienteCard';
 import { ClienteFormModal } from '../clientes/ClienteFormModal';
 import { ClienteDetailModal } from '../clientes/ClienteDetailModal';
 import { MarcarVisitaModal } from '../clientes/MarcarVisitaModal';
+import { ClientInvitationCard } from '../clientes/ClientInvitationCard';
 import { calcularDiasRestantes } from '../../utils/dateUtils';
 
 type FilterOption = 'todos' | 'vencidos_semana' | '30' | '60' | '90' | 'solicitudes';
@@ -297,6 +298,9 @@ export function ClientesTab() {
           </div>
         </div>
       </div>
+
+      {/* Link de Invitación Exclusivo para Clientes */}
+      <ClientInvitationCard />
 
       {/* PENDING CLIENT REQUESTS NOTIFICATION CARD */}
       {solicitudesPendientes.length > 0 && (

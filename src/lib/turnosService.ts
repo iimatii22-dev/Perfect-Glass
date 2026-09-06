@@ -12,7 +12,7 @@ import {
   onSnapshot,
 } from 'firebase/firestore';
 import { db } from './firebase';
-import { Turno, Cliente, BusinessConfig } from '../types';
+import { Turno, Cliente, BusinessConfig, TurnoEstado } from '../types';
 import {
   enviarEmailConfirmacionCliente,
   enviarAvisoVidrieroNuevoTurno,
@@ -23,6 +23,11 @@ import {
   enviarNotificacionCancelacionAlVidriero,
   enviarNotificacionConfirmacionCliente,
 } from './pushNotificationService';
+import {
+  notificarNuevaReserva,
+  notificarReservaConfirmada,
+  notificarTrabajoCompletadoYResena,
+} from './notificacionesService';
 import { getTodayISODate } from '../utils/dateUtils';
 import { isModoSandboxActivo } from './sandboxService';
 
@@ -60,6 +65,27 @@ export function generarTokenCancelacionSeguro(): string {
   const s2 = Math.random().toString(36).substring(2, 12);
   const s3 = Math.random().toString(36).substring(2, 14);
   return `${s1}${s2}${s3}`.substring(0, 32);
+}
+
+/**
+ * Calculates SHA-256 hash using the Web Crypto API.
+ */
+export async function calcularSha256(str: string): Promise<string> {
+  if (!str) return '';
+  if (typeof crypto !== 'undefined' && crypto.subtle) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(str.trim());
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
+  // Fallback for environments without subtle crypto
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash << 5) - hash + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash).toString(16).padStart(64, '0');
 }
 
 /**
@@ -251,6 +277,7 @@ export function calcularHorariosDisponibles(
 export async function createTurno(
   turnoData: {
     clienteId?: string;
+    clienteUid?: string;
     nombreCliente: string;
     telefonoCliente: string;
     emailCliente: string;
@@ -260,6 +287,7 @@ export async function createTurno(
     duracionMinutos?: number;
     notas?: string;
     esSandbox?: boolean;
+    estado?: TurnoEstado;
   },
   config: BusinessConfig,
   forzarEsSandbox?: boolean
@@ -268,40 +296,60 @@ export async function createTurno(
     turnoData.duracionMinutos || config.duracionServicioDefaultMinutos || 30;
   const horaFin = calcularHoraFin(turnoData.horaInicio, duracionMinutos);
   const tokenCancelacion = generarTokenCancelacionSeguro();
+  const tokenCancelacionHash = await calcularSha256(tokenCancelacion);
 
   // Check if Sandbox mode is active
   const sandboxActivo = await isModoSandboxActivo();
   const esSandbox = forzarEsSandbox !== undefined ? forzarEsSandbox : (turnoData.esSandbox ?? sandboxActivo);
 
   const id = `turno_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-  const nuevoTurno: Turno = {
+  
+  // Security: No se almacena el token original en texto plano en Firestore.
+  // Se guarda únicamente el hash criptográfico SHA-256 en tokenCancelacionHash.
+  const firestorePayload = {
     id,
     negocioId: config.id || 'perfect-glass',
     clienteId: turnoData.clienteId || 'nuevoCliente',
     nombreCliente: turnoData.nombreCliente.trim(),
     telefonoCliente: turnoData.telefonoCliente.trim(),
     emailCliente: turnoData.emailCliente.trim(),
+    direccionServicio: turnoData.direccion?.trim() || '',
     direccion: turnoData.direccion?.trim() || '',
     fecha: turnoData.fecha,
     horaInicio: turnoData.horaInicio,
     horaFin,
     duracionMinutos,
-    estado: 'confirmado',
+    estado: (turnoData.estado || 'confirmado') as TurnoEstado,
+    tokenCancelacionHash,
+    fechaCancelacion: null,
+    emailConfirmacionEnviado: false,
+    emailCancelacionEnviado: false,
+    creadoEn: new Date().toISOString(),
     notas: turnoData.notas?.trim() || '',
     esSandbox,
-    tokenCancelacion,
-    cancelToken: tokenCancelacion,
-    emailEnviado: false,
     notificacionEnviada: false,
     recordatorioEnviado: false,
-    fechaCancelacion: null,
-    creadoEn: new Date().toISOString(),
   };
 
   const docRef = doc(db, COLLECTION_NAME, id);
-  await setDoc(docRef, nuevoTurno);
+  await setDoc(docRef, firestorePayload);
 
-  // Send asynchronous email and push notifications
+  // Return the in-memory object containing plaintext token for immediate user view
+  const nuevoTurno: Turno = {
+    ...firestorePayload,
+    tokenCancelacion,
+    cancelToken: tokenCancelacion,
+    emailEnviado: false,
+  };
+
+  // Despachar notificaciones internas de Perfect Glass (sólo tras guardado exitoso)
+  try {
+    await notificarNuevaReserva(nuevoTurno, config, turnoData.clienteUid);
+  } catch (notifErr) {
+    console.warn('Notice: Internal notification dispatch for nueva reserva:', notifErr);
+  }
+
+  // Send asynchronous push notifications and client logging
   try {
     const [clientEmailResult] = await Promise.allSettled([
       enviarEmailConfirmacionCliente(nuevoTurno, config),
@@ -324,14 +372,38 @@ export async function createTurno(
 }
 
 /**
- * Retrieves a Turno by its unique cancellation token
+ * Retrieves a Turno by its unique cancellation token (by computing SHA-256 hash)
  */
-export async function getTurnoByCancelToken(token: string): Promise<Turno | null> {
+export async function getTurnoByCancelToken(token: string, turnoId?: string): Promise<Turno | null> {
   if (!token || !token.trim()) return null;
   const cleanToken = token.trim();
+  const tokenHash = await calcularSha256(cleanToken);
+
+  // 1. If turnoId is provided, fetch directly and compare hash
+  if (turnoId && turnoId.trim()) {
+    const directDoc = await getTurnoById(turnoId.trim());
+    if (directDoc) {
+      if (
+        directDoc.tokenCancelacionHash === tokenHash ||
+        directDoc.tokenCancelacion === cleanToken ||
+        directDoc.cancelToken === cleanToken
+      ) {
+        return directDoc;
+      }
+    }
+  }
+
   const colRef = collection(db, COLLECTION_NAME);
 
-  // 1. Search by tokenCancelacion
+  // 2. Search by tokenCancelacionHash
+  const qHash = query(colRef, where('tokenCancelacionHash', '==', tokenHash));
+  const snapHash = await getDocs(qHash);
+  if (!snapHash.empty) {
+    const docSnap = snapHash.docs[0];
+    return { id: docSnap.id, ...docSnap.data() } as Turno;
+  }
+
+  // 3. Fallback search by tokenCancelacion (legacy)
   const q1 = query(colRef, where('tokenCancelacion', '==', cleanToken));
   const snap1 = await getDocs(q1);
   if (!snap1.empty) {
@@ -339,7 +411,7 @@ export async function getTurnoByCancelToken(token: string): Promise<Turno | null
     return { id: docSnap.id, ...docSnap.data() } as Turno;
   }
 
-  // 2. Fallback search by cancelToken (legacy)
+  // 4. Fallback search by cancelToken (legacy)
   const q2 = query(colRef, where('cancelToken', '==', cleanToken));
   const snap2 = await getDocs(q2);
   if (!snap2.empty) {
@@ -440,14 +512,53 @@ export async function cancelTurno(
 }
 
 /**
+ * Confirm a Turno by ID
+ */
+export async function confirmarTurno(turnoId: string, config?: BusinessConfig): Promise<void> {
+  const docRef = doc(db, COLLECTION_NAME, turnoId);
+  const snap = await getDoc(docRef);
+
+  await updateDoc(docRef, {
+    estado: 'confirmado',
+    confirmadoEn: new Date().toISOString(),
+  });
+
+  if (snap.exists()) {
+    const turno = { id: snap.id, ...snap.data(), estado: 'confirmado' } as Turno;
+    try {
+      await notificarReservaConfirmada(
+        turno,
+        config || ({ id: turno.negocioId || 'perfect-glass' } as BusinessConfig)
+      );
+    } catch (err) {
+      console.warn('Error sending internal notification for reserva confirmada:', err);
+    }
+  }
+}
+
+/**
  * Complete a Turno by ID
  */
-export async function completarTurno(turnoId: string): Promise<void> {
+export async function completarTurno(turnoId: string, config?: BusinessConfig): Promise<void> {
   const docRef = doc(db, COLLECTION_NAME, turnoId);
+  const snap = await getDoc(docRef);
+
   await updateDoc(docRef, {
     estado: 'completado',
     completadoEn: new Date().toISOString(),
   });
+
+  if (snap.exists()) {
+    const turno = { id: snap.id, ...snap.data(), estado: 'completado' } as Turno;
+    try {
+      await notificarTrabajoCompletadoYResena(
+        turno,
+        config || ({ id: turno.negocioId || 'perfect-glass' } as BusinessConfig)
+      );
+    } catch (err) {
+      console.warn('Error sending internal notifications for completed job and review request:', err);
+    }
+  }
 }
 
 /**

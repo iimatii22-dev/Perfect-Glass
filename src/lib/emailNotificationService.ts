@@ -17,11 +17,10 @@ export interface EmailLog {
 const EMAIL_LOGS_KEY = 'perfectglass_email_logs';
 
 /**
- * Enqueues an email into Firestore 'mail' collection for the Firebase Extension "Trigger Email from Firestore"
- * (or Cloud Functions / SendGrid / Resend bridge).
- * In Sandbox Mode, emails are NOT dispatched to 'mail' but saved in 'emailsSimulados' collection.
+ * Records an email event in Firestore 'logsEmails' and 'emailsSimulados'.
+ * Replaces any dependency on Firebase Extensions or Trigger Email with Cloud Functions 2nd Gen + Resend.
  */
-export async function enqueueMailForFirebaseExtension(mailData: {
+export async function registrarEmailNotificacion(mailData: {
   to: string | string[];
   subject: string;
   text: string;
@@ -30,6 +29,7 @@ export async function enqueueMailForFirebaseExtension(mailData: {
   negocioId?: string;
   turnoId?: string;
   clienteId?: string;
+  linkCancelacion?: string;
 }): Promise<void> {
   try {
     const recipients = Array.isArray(mailData.to) ? mailData.to : [mailData.to];
@@ -41,7 +41,7 @@ export async function enqueueMailForFirebaseExtension(mailData: {
       return;
     }
 
-    // Check Sandbox Mode: if active, simulate email and DO NOT send real email
+    // Check Sandbox Mode: if active, simulate email and save to 'emailsSimulados'
     const sandboxActivo = await isModoSandboxActivo();
     if (sandboxActivo) {
       await guardarEmailSimulado({
@@ -55,28 +55,30 @@ export async function enqueueMailForFirebaseExtension(mailData: {
         clienteId: mailData.clienteId,
         metadata: {
           html: mailData.html || null,
+          linkCancelacion: mailData.linkCancelacion,
         },
       });
-      return;
     }
 
-    await addDoc(collection(db, 'mail'), {
-      to: validRecipients,
-      message: {
-        subject: mailData.subject,
-        text: mailData.text,
-        html: mailData.html || `<p>${mailData.text.replace(/\n/g, '<br/>')}</p>`,
-      },
-      tipo: mailData.tipo || 'general',
+    // Register in logsEmails collection for audit
+    await addDoc(collection(db, 'logsEmails'), {
+      destinatario: validRecipients.join(', '),
+      asunto: mailData.subject,
+      tipo: mailData.tipo || 'confirmacion_cliente',
       negocioId: mailData.negocioId || 'perfect-glass',
       turnoId: mailData.turnoId || null,
       clienteId: mailData.clienteId || null,
-      createdAt: new Date().toISOString(),
+      estado: sandboxActivo ? 'simulado' : 'enviado',
+      fecha: new Date().toISOString(),
+      esSandbox: sandboxActivo,
     });
   } catch (error) {
-    console.warn('Notice: Firebase Extension mail document could not be enqueued to /mail collection:', error);
+    console.warn('Notice: Email log could not be saved to logsEmails:', error);
   }
 }
+
+// Backwards compatibility alias
+export const enqueueMailForFirebaseExtension = registrarEmailNotificacion;
 
 /**
  * Saves an email record to local history for inspection / audit

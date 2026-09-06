@@ -12,7 +12,7 @@ import {
   limit,
   addDoc,
 } from 'firebase/firestore';
-import { app, db, DEFAULT_CONFIG } from './firebase';
+import { app, db, DEFAULT_CONFIG, firebaseConfig } from './firebase';
 import { TokenPush, LogNotificacion, Turno, BusinessConfig, UserRole } from '../types';
 import { formatearFecha } from '../utils/dateUtils';
 import { isModoSandboxActivo } from './sandboxService';
@@ -120,7 +120,10 @@ export async function solicitarPermisoPush(
     let swRegistration: ServiceWorkerRegistration | undefined;
     if ('serviceWorker' in navigator) {
       try {
-        swRegistration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+        const swUrl = firebaseConfig.apiKey
+          ? `/firebase-messaging-sw.js?apiKey=${encodeURIComponent(firebaseConfig.apiKey)}&authDomain=${encodeURIComponent(firebaseConfig.authDomain)}&projectId=${encodeURIComponent(firebaseConfig.projectId)}&storageBucket=${encodeURIComponent(firebaseConfig.storageBucket)}&messagingSenderId=${encodeURIComponent(firebaseConfig.messagingSenderId)}&appId=${encodeURIComponent(firebaseConfig.appId)}`
+          : '/firebase-messaging-sw.js';
+        swRegistration = await navigator.serviceWorker.register(swUrl);
         await navigator.serviceWorker.ready;
       } catch (swErr) {
         console.warn('Fallback registering /sw.js:', swErr);
@@ -172,6 +175,7 @@ export async function solicitarPermisoPush(
     const tokenData: TokenPush = {
       id: uid,
       uid,
+      usuarioId: uid,
       email: email || null,
       rol,
       negocioId,

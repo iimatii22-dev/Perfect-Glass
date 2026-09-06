@@ -18,6 +18,7 @@ import { formatearFechaLarga } from '../../utils/dateUtils';
 
 interface PublicCancelacionPageProps {
   token: string;
+  turnoId?: string;
   config: BusinessConfig;
   onBackToApp?: () => void;
   onGoToBooking?: () => void;
@@ -25,6 +26,7 @@ interface PublicCancelacionPageProps {
 
 export const PublicCancelacionPage: React.FC<PublicCancelacionPageProps> = ({
   token,
+  turnoId,
   config,
   onBackToApp,
   onGoToBooking,
@@ -39,7 +41,7 @@ export const PublicCancelacionPage: React.FC<PublicCancelacionPageProps> = ({
   const businessName = config.nombreNegocio || 'Perfect Glass';
   const primaryColor = config.colorPrimario || '#0284c7';
 
-  // Load Turno details by cancellation token
+  // Load Turno details by cancellation token & optional turnoId
   useEffect(() => {
     let isMounted = true;
 
@@ -54,7 +56,7 @@ export const PublicCancelacionPage: React.FC<PublicCancelacionPageProps> = ({
 
       try {
         setLoading(true);
-        const fetched = await getTurnoByCancelToken(token);
+        const fetched = await getTurnoByCancelToken(token, turnoId);
         if (!isMounted) return;
 
         if (!fetched) {

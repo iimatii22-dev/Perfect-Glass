@@ -2,32 +2,52 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore, doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { getStorage, ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import firebaseConfigData from '../../firebase-applet-config.json';
+import { getMessaging, isSupported } from 'firebase/messaging';
 import { BusinessConfig } from '../types';
 
+const rawApiKey = (import.meta.env.VITE_FIREBASE_API_KEY || '').trim();
+// Firebase Auth requiere un string con formato válido de API key (ej. prefijo 'AIzaSy')
+// para inicializarse sin lanzar auth/invalid-api-key en la carga del módulo si la variable aún no fue provista.
+const apiKey = rawApiKey || 'AIzaSy_CONFIGURAR_VITE_FIREBASE_API_KEY';
+
 export const firebaseConfig = {
-  apiKey: firebaseConfigData.apiKey,
-  authDomain: firebaseConfigData.authDomain,
-  projectId: firebaseConfigData.projectId,
-  storageBucket: firebaseConfigData.storageBucket,
-  messagingSenderId: firebaseConfigData.messagingSenderId,
-  appId: firebaseConfigData.appId,
-  measurementId: firebaseConfigData.measurementId,
+  apiKey,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'gestion-servicios-uy.firebaseapp.com',
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'gestion-servicios-uy',
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'gestion-servicios-uy.firebasestorage.app',
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '405657363471',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:405657363471:web:41c81daad92c312340ef7a',
 };
 
-// Initialize Firebase App singleton
+// Protección para evitar inicializar Firebase más de una vez usando getApps() y getApp()
 export const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
 // Authentication
 export const auth = getAuth(app);
 
-// Firestore (with specific databaseId if provided)
-export const db = firebaseConfigData.firestoreDatabaseId
-  ? getFirestore(app, firebaseConfigData.firestoreDatabaseId)
-  : getFirestore(app);
+// Firestore
+export const db = getFirestore(app);
 
 // Storage
 export const storage = getStorage(app);
+
+// Messaging (notificaciones push inicializadas condicionalmente si el navegador lo soporta)
+export let messaging: ReturnType<typeof getMessaging> | null = null;
+if (typeof window !== 'undefined') {
+  isSupported()
+    .then((supported) => {
+      if (supported) {
+        try {
+          messaging = getMessaging(app);
+        } catch (e) {
+          console.warn('[Firebase Messaging] Error en inicialización:', e);
+        }
+      }
+    })
+    .catch((err) => {
+      console.warn('[Firebase Messaging] Verificación de soporte falló:', err);
+    });
+}
 
 export const DEFAULT_CONFIG: BusinessConfig = {
   id: 'perfect-glass',
@@ -101,22 +121,29 @@ export function subscribeToBusinessConfig(
   callback: (config: BusinessConfig) => void,
   negocioId: string = DEFAULT_NEGOCIO_ID
 ): () => void {
-  const configDocRef = doc(db, NEGOCIOS_COLLECTION, negocioId);
-  return onSnapshot(
-    configDocRef,
-    (snap) => {
-      if (snap.exists()) {
-        callback({ ...DEFAULT_CONFIG, id: snap.id, ...snap.data() } as BusinessConfig);
-      } else {
-        // Auto-seed
-        getBusinessConfig(negocioId).then(callback).catch(() => callback(DEFAULT_CONFIG));
+  // Invocar inmediatamente con la configuración base para no bloquear la interfaz
+  callback(DEFAULT_CONFIG);
+
+  try {
+    const configDocRef = doc(db, NEGOCIOS_COLLECTION, negocioId);
+    return onSnapshot(
+      configDocRef,
+      (snap) => {
+        if (snap.exists()) {
+          callback({ ...DEFAULT_CONFIG, id: snap.id, ...snap.data() } as BusinessConfig);
+        } else {
+          callback(DEFAULT_CONFIG);
+        }
+      },
+      (error) => {
+        // En caso de permisos insuficientes (usuarios no autenticados o clientes), fallback inmediato
+        callback(DEFAULT_CONFIG);
       }
-    },
-    (error) => {
-      console.warn('Firestore config subscription error:', error);
-      callback(DEFAULT_CONFIG);
-    }
-  );
+    );
+  } catch (err) {
+    callback(DEFAULT_CONFIG);
+    return () => {};
+  }
 }
 
 /**
@@ -131,7 +158,7 @@ export async function saveBusinessConfig(
   const configDocRef = doc(db, NEGOCIOS_COLLECTION, targetId);
   const rawData: Record<string, any> = {
     ...config,
-    updatedAt: new Date().toISOString(),
+    actualizadoEn: new Date().toISOString(),
     updatedBy: userId || 'admin',
   };
   
@@ -144,6 +171,22 @@ export async function saveBusinessConfig(
   }
 
   await setDoc(configDocRef, dataToSave, { merge: true });
+
+  // Sincronizar vista pública desinfectada en negociosPublicos
+  try {
+    const pubRef = doc(db, 'negociosPublicos', 'perfect-glass-vip');
+    await setDoc(pubRef, {
+      negocioId: targetId,
+      nombreNegocio: dataToSave.nombreNegocio || DEFAULT_CONFIG.nombreNegocio,
+      logoUrl: dataToSave.logoUrl || '/icon-192.svg',
+      colorPrimario: dataToSave.colorPrimario || '#0284c7',
+      activo: dataToSave.activo !== false,
+      refCode: 'perfect-glass-vip',
+      googleReviewsUrl: dataToSave.linkGoogleReviews || '',
+    }, { merge: true });
+  } catch (pubErr) {
+    // non-blocking
+  }
 
   // Also sync to legacy configuracion/negocio if it is perfect-glass to keep full backwards compatibility
   if (targetId === DEFAULT_NEGOCIO_ID) {

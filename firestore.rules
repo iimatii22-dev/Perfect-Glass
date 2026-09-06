@@ -2,87 +2,596 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Helper functions
+    // =========================================================================
+    // 1. FUNCIONES AUXILIARES DE AUTENTICACIÓN Y ROLES (RBAC & MULTI-TENANT)
+    // =========================================================================
+    
     function isSignedIn() {
       return request.auth != null;
     }
     
-    function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
-    }
-
-    // Configuración del negocio (lectura y escritura para personalización y branding)
-    match /configuracion/{docId} {
-      allow read, write: if true;
-    }
-
-    // Tarifas y precios base
-    match /tarifas/{docId} {
-      allow read, write: if true;
-    }
-
-    // Plantillas de presupuestos reutilizables
-    match /plantillasPresupuesto/{plantillaId} {
-      allow read, write: if true;
-    }
-
-    // Historial de presupuestos y cotizaciones
-    match /presupuestos/{presupuestoId} {
-      allow read, write: if true;
+    function hasUserDoc() {
+      return isSignedIn() && exists(/databases/$(database)/documents/usuarios/$(request.auth.uid));
     }
     
-    // Clientes y fichas técnicas
-    match /clientes/{clienteId} {
-      allow read, write: if true;
+    function getUserData() {
+      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data;
+    }
+    
+    function isSuperAdmin() {
+      return hasUserDoc() && getUserData().rol == 'superadmin';
+    }
+    
+    function isAdmin() {
+      return hasUserDoc() && getUserData().rol == 'admin' && getUserData().estado == 'activo';
+    }
+    
+    function isCliente() {
+      return hasUserDoc() && getUserData().rol == 'cliente';
+    }
+    
+    function isClienteActivo() {
+      return isCliente() && getUserData().estado == 'activo';
+    }
 
-      // Subcolección de sellos otorgados
+    function isSameBusiness(negocioId) {
+      return isSuperAdmin() || (isAdmin() && getUserData().negocioId == negocioId);
+    }
+    
+    // Validación estricta de negocio activo: activo debe ser exactamente true
+    function isNegocioActivo(negocioId) {
+      return exists(/databases/$(database)/documents/negocios/$(negocioId)) &&
+             get(/databases/$(database)/documents/negocios/$(negocioId)).data.activo == true;
+    }
+
+    // =========================================================================
+    // 2. USUARIOS: usuarios/{uid}
+    // =========================================================================
+    match /usuarios/{uid} {
+      // Superadmin: lectura total. Usuario autenticado: solo su propio documento.
+      allow read: if isSuperAdmin() || (isSignedIn() && request.auth.uid == uid);
+      
+      // Creación durante registro:
+      // - Solo su propio UID autenticado
+      // - Schema cerrado
+      // - Rol solo 'cliente' o 'admin' (NUNCA superadmin)
+      // - Estado inicial estrictamente 'pendiente'
+      // - Si rol es 'admin', negocioId debe estar vacío/null/ausente
+      // - Si rol es 'cliente', negocioId debe ser string no vacío
+      allow create: if isSignedIn() &&
+        request.auth.uid == uid &&
+        request.resource.data.uid == uid &&
+        request.resource.data.keys().hasOnly([
+          'uid', 'email', 'rol', 'negocioId', 'estado',
+          'nombre', 'telefono', 'fotoPerfilUrl', 'creadoEn', 'actualizadoEn'
+        ]) &&
+        request.resource.data.email is string && request.resource.data.email.size() > 0 &&
+        request.resource.data.nombre is string && request.resource.data.nombre.size() > 0 &&
+        request.resource.data.telefono is string && request.resource.data.telefono.size() > 0 &&
+        (request.resource.data.rol == 'cliente' || request.resource.data.rol == 'admin') &&
+        request.resource.data.rol != 'superadmin' &&
+        request.resource.data.estado == 'pendiente' &&
+        request.resource.data.creadoEn is string &&
+        request.resource.data.actualizadoEn is string &&
+        (
+          (request.resource.data.rol == 'admin' && (
+            !('negocioId' in request.resource.data) ||
+            request.resource.data.negocioId == null ||
+            request.resource.data.negocioId == ''
+          )) ||
+          (request.resource.data.rol == 'cliente' &&
+            request.resource.data.negocioId is string &&
+            request.resource.data.negocioId.size() > 0
+          )
+        );
+
+      // Actualización propia: solo campos de contacto y perfil no sensibles.
+      // Superadmin es el único que puede alterar rol, negocioId o estado.
+      allow update: if isSuperAdmin() || (
+        isSignedIn() &&
+        request.auth.uid == uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'nombre', 'telefono', 'fotoPerfilUrl', 'actualizadoEn'
+        ]) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'rol', 'negocioId', 'estado', 'uid', 'email', 'creadoEn'
+        ])
+      );
+
+      // Eliminación: estrictamente reservada a Superadmin
+      allow delete: if isSuperAdmin();
+    }
+
+    // =========================================================================
+    // 3. SOLICITUDES DE ALTA DE NEGOCIO: solicitudesNegocio/{uid}
+    // =========================================================================
+    match /solicitudesNegocio/{uid} {
+      // SuperAdmin puede leer todas las solicitudes para revisarlas y aprobarlas.
+      // El solicitante autenticado solo puede consultar su propio estado de solicitud.
+      allow read: if isSuperAdmin() || (isSignedIn() && request.auth.uid == uid);
+
+      // El vidriero solicitante solo puede crear su propia solicitud si su usuario tiene rol admin y estado pendiente
+      allow create: if isSignedIn() &&
+        request.auth.uid == uid &&
+        request.resource.data.uid == uid &&
+        request.resource.data.keys().hasOnly([
+          'uid', 'email', 'nombreSolicitante', 'nombreNegocio', 'telefono', 'estado', 'creadoEn'
+        ]) &&
+        request.resource.data.email is string && request.resource.data.email.size() > 0 &&
+        request.resource.data.nombreSolicitante is string && request.resource.data.nombreSolicitante.size() > 0 &&
+        request.resource.data.nombreNegocio is string && request.resource.data.nombreNegocio.size() > 0 &&
+        request.resource.data.telefono is string && request.resource.data.telefono.size() > 0 &&
+        request.resource.data.estado == 'pendiente' &&
+        request.resource.data.creadoEn is string &&
+        exists(/databases/$(database)/documents/usuarios/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.rol == 'admin' &&
+        get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.estado == 'pendiente';
+
+      // Solo SuperAdmin puede actualizar (aprobar/rechazar) o eliminar la solicitud
+      allow update, delete: if isSuperAdmin();
+    }
+
+    // =========================================================================
+    // 4. NEGOCIOS: negociosPublicos/{refCode} & negocios/{negocioId}
+    // =========================================================================
+    
+    // Vista pública mínima desinfectada (sin emails, teléfonos privados ni datos de facturación)
+    match /negociosPublicos/{refCode} {
+      allow read: if true;
+
+      // Solo SuperAdmin puede crear documentos en negociosPublicos
+      allow create: if isSuperAdmin() &&
+        request.resource.data.refCode == refCode &&
+        request.resource.data.keys().hasOnly([
+          'negocioId', 'nombreNegocio', 'logoUrl', 'colorPrimario', 'activo', 'refCode', 'googleReviewsUrl'
+        ]) &&
+        request.resource.data.negocioId is string && request.resource.data.negocioId.size() > 0 &&
+        request.resource.data.nombreNegocio is string &&
+        request.resource.data.activo is bool &&
+        request.resource.data.refCode is string;
+
+      // Actualización:
+      // - SuperAdmin: total (incluye cambiar activo, refCode, negocioId)
+      // - Admin: solo de su negocio, sin alterar negocioId, refCode ni activo.
+      //   Solo puede editar: nombreNegocio, logoUrl, colorPrimario y googleReviewsUrl
+      allow update: if isSuperAdmin() || (
+        isAdmin() &&
+        resource.data.negocioId == getUserData().negocioId &&
+        request.resource.data.negocioId == resource.data.negocioId &&
+        request.resource.data.refCode == resource.data.refCode &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'nombreNegocio', 'logoUrl', 'colorPrimario', 'googleReviewsUrl'
+        ])
+      );
+
+      // Solo SuperAdmin puede eliminar documentos públicos
+      allow delete: if isSuperAdmin();
+    }
+
+    // Datos privados y operativos del negocio
+    match /negocios/{negocioId} {
+      // Lectura: solo Superadmin o Admin asignado al negocio. Nunca lectura pública anónima.
+      allow read: if isSuperAdmin() || (isAdmin() && getUserData().negocioId == negocioId);
+      
+      // Creación y eliminación: solo Superadmin
+      allow create, delete: if isSuperAdmin();
+      
+      // Actualización: Superadmin o Admin activo (este último no puede alterar campos estructurales)
+      allow update: if isSuperAdmin() || (
+        isAdmin() &&
+        getUserData().negocioId == negocioId &&
+        resource.data.negocioId == negocioId &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'adminUid', 'negocioId', 'plan', 'activo', 'creadoEn'
+        ])
+      );
+    }
+
+    // =========================================================================
+    // 5. CONFIGURACIÓN DEL NEGOCIO: configuracion/{docId}
+    // =========================================================================
+    match /configuracion/{docId} {
+      // Superadmin y Admin del negocio exclusivamente. Clientes NO tienen acceso.
+      allow read: if isSuperAdmin() || (
+        isAdmin() && getUserData().negocioId == docId
+      );
+      
+      // Creación y eliminación: solo Superadmin
+      allow create, delete: if isSuperAdmin();
+
+      // Actualización: Admin del negocio sin alterar negocioId ni creadoEn
+      allow update: if isSuperAdmin() || (
+        isAdmin() &&
+        getUserData().negocioId == docId &&
+        resource.data.negocioId == docId &&
+        request.resource.data.negocioId == resource.data.negocioId &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'negocioId', 'creadoEn'
+        ])
+      );
+    }
+
+    // =========================================================================
+    // 6. CLIENTES: clientes/{clienteId}
+    // =========================================================================
+    match /clientes/{clienteId} {
+      // Lectura:
+      // - Superadmin: total
+      // - Admin activo: solo clientes de su propio negocioId
+      // - Cliente (activo o pendiente): solo su propia ficha
+      allow read: if isSuperAdmin() || (
+        isAdmin() && resource.data.negocioId == getUserData().negocioId
+      ) || (
+        isCliente() && resource.data.usuarioId == request.auth.uid
+      );
+
+      // Creación:
+      // - Superadmin: total
+      // - Admin activo: puede crear fichas para su propio negocio
+      // - Cliente autenticado: puede crear únicamente su propia solicitud inicial pendiente con datos de contacto
+      allow create: if isSuperAdmin() || (
+        isAdmin() && request.resource.data.negocioId == getUserData().negocioId
+      ) || (
+        isCliente() &&
+        request.resource.data.usuarioId == request.auth.uid &&
+        request.resource.data.estadoRegistro == 'pendiente' &&
+        request.resource.data.sellosAcumulados == 0 &&
+        request.resource.data.recompensaDisponible == false &&
+        isNegocioActivo(request.resource.data.negocioId) &&
+        request.resource.data.keys().hasOnly([
+          'usuarioId', 'negocioId', 'email', 'emailRegistro', 'nombre',
+          'telefono', 'direccion', 'localComercial', 'estadoRegistro',
+          'sellosAcumulados', 'recompensaDisponible', 'creadoEn', 'actualizadoEn'
+        ]) &&
+        request.resource.data.nombre is string && request.resource.data.nombre.size() > 0 &&
+        request.resource.data.telefono is string && request.resource.data.telefono.size() > 0 &&
+        request.resource.data.email is string && request.resource.data.email.size() > 0 &&
+        request.resource.data.emailRegistro is string && request.resource.data.emailRegistro.size() > 0 &&
+        request.resource.data.localComercial is string &&
+        request.resource.data.direccion is string &&
+        request.resource.data.creadoEn is string &&
+        request.resource.data.actualizadoEn is string
+      );
+
+      // Actualización:
+      // - Superadmin: total
+      // - Admin activo: solo campos operativos de la ficha (sin modificar agenda, sellos ni recompensas)
+      // - Cliente: solo campos de contacto explícitamente permitidos con doble validación defensiva
+      allow update: if isSuperAdmin() || (
+        isAdmin() &&
+        resource.data.negocioId == getUserData().negocioId &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'nombre', 'telefono', 'direccion', 'localComercial', 'zona',
+          'tipoSuperficie', 'frecuenciaVisitaDias', 'duracionServicioMinutos',
+          'notas', 'estadoRegistro', 'activo', 'fechaProximaVisita'
+        ]) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'usuarioId', 'negocioId', 'email', 'emailRegistro', 'creadoEn',
+          'actualizadoEn', 'aprobadoEn', 'aprobadoPor', 'sellosAcumulados',
+          'sellosNecesarios', 'recompensaDisponible', 'recompensaDescripcion',
+          'totalRecompensasCanjeadas', 'fechaUltimaVisita', 'historialVisitas'
+        ])
+      ) || (
+        isCliente() &&
+        resource.data.usuarioId == request.auth.uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'nombre', 'telefono', 'direccion', 'localComercial', 'actualizadoEn'
+        ]) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'negocioId', 'usuarioId', 'email', 'emailRegistro', 'estadoRegistro',
+          'sellosAcumulados', 'sellosNecesarios', 'recompensaDisponible',
+          'recompensaDescripcion', 'totalRecompensasCanjeadas',
+          'fechaUltimaVisita', 'fechaProximaVisita', 'frecuenciaVisitaDias',
+          'duracionServicioMinutos', 'tipoSuperficie', 'zona', 'notas',
+          'activo', 'creadoEn', 'aprobadoEn', 'aprobadoPor'
+        ])
+      );
+
+      // Eliminación: Superadmin o Admin de su negocio
+      allow delete: if isSuperAdmin() || (
+        isAdmin() && resource.data.negocioId == getUserData().negocioId
+      );
+
+      // -----------------------------------------------------------------------
+      // 6.1 Subcolección de Sellos: clientes/{clienteId}/sellosHistorial/{selloId}
+      // -----------------------------------------------------------------------
       match /sellosHistorial/{selloId} {
-        allow read, write: if true;
+        // Lectura: Superadmin, Admin del negocio, o Cliente dueño de la ficha
+        allow read: if isSuperAdmin() || (
+          isAdmin() &&
+          get(/databases/$(database)/documents/clientes/$(clienteId)).data.negocioId == getUserData().negocioId
+        ) || (
+          isCliente() &&
+          get(/databases/$(database)/documents/clientes/$(clienteId)).data.usuarioId == request.auth.uid
+        );
+
+        // Creación: Solo SuperAdmin con schema cerrado y consistencia estricta.
+        // La creación para visitas completadas por Admins debe realizarse mediante Cloud Function transaccional.
+        allow create: if isSuperAdmin() &&
+          request.resource.data.keys().hasOnly([
+            'negocioId', 'clienteId', 'otorgadoPor', 'fecha', 'visitaId', 'tipo', 'nota'
+          ]) &&
+          request.resource.data.clienteId == clienteId &&
+          request.resource.data.negocioId == get(/databases/$(database)/documents/clientes/$(clienteId)).data.negocioId &&
+          request.resource.data.tipo in ['visita_completada', 'correccion'] &&
+          request.resource.data.fecha is string;
+
+        // Inmutables: Nadie puede modificar ni borrar sellos históricos desde el navegador
+        allow update, delete: if false;
       }
     }
-    
-    // Cola de emails (Firebase Extensions Trigger Email)
-    match /mail/{mailId} {
-      allow read, write: if true;
-    }
 
-    // Turnos de auto-agendamiento público
+    // =========================================================================
+    // 7. TURNOS: turnos/{turnoId}
+    // =========================================================================
     match /turnos/{turnoId} {
-      allow read, write: if true;
-    }
-    
-    // Agenda interna del vidriero
-    match /agenda/{docId} {
-      allow read, write: if true;
-    }
-    
-    // Fidelidad
-    match /fidelidad/{docId} {
-      allow read, write: if true;
+      // Lectura: Superadmin, Admin del negocio, o Cliente autenticado dueño del turno
+      allow read: if isSuperAdmin() || (
+        isAdmin() && resource.data.negocioId == getUserData().negocioId
+      ) || (
+        isCliente() && resource.data.usuarioId == request.auth.uid
+      );
+
+      // Creación:
+      // - Superadmin: total
+      // - Admin activo: para su negocio
+      // - Cliente activo: solo solicitud para sí mismo con estado 'solicitado' y validación del cliente padre
+      allow create: if isSuperAdmin() || (
+        isAdmin() && request.resource.data.negocioId == getUserData().negocioId
+      ) || (
+        isClienteActivo() &&
+        request.resource.data.usuarioId == request.auth.uid &&
+        request.resource.data.estado == 'solicitado' &&
+        request.resource.data.clienteId is string &&
+        exists(/databases/$(database)/documents/clientes/$(request.resource.data.clienteId)) &&
+        get(/databases/$(database)/documents/clientes/$(request.resource.data.clienteId)).data.usuarioId == request.auth.uid &&
+        request.resource.data.negocioId == get(/databases/$(database)/documents/clientes/$(request.resource.data.clienteId)).data.negocioId &&
+        request.resource.data.keys().hasOnly([
+          'id', 'negocioId', 'clienteId', 'usuarioId', 'nombreCliente',
+          'telefonoCliente', 'emailCliente', 'direccion', 'direccionServicio',
+          'fecha', 'horaInicio', 'horaFin', 'duracionMinutos', 'estado',
+          'notas', 'creadoEn', 'actualizadoEn'
+        ]) &&
+        !('tokenCancelacionHash' in request.resource.data) &&
+        !('tokenCancelacion' in request.resource.data)
+      );
+
+      // Actualización: Superadmin o Admin activo de su negocio
+      // Los clientes y cancelaciones con token operan exclusivamente a través de Cloud Functions
+      allow update: if isSuperAdmin() || (
+        isAdmin() &&
+        resource.data.negocioId == getUserData().negocioId &&
+        request.resource.data.negocioId == resource.data.negocioId &&
+        request.resource.data.clienteId == resource.data.clienteId
+      );
+
+      // Eliminación: Superadmin o Admin del negocio
+      allow delete: if isSuperAdmin() || (
+        isAdmin() && resource.data.negocioId == getUserData().negocioId
+      );
     }
 
-    // Reseñas de clientes
+    // =========================================================================
+    // 8. FEEDBACK INTERNO Y RESEÑAS
+    // =========================================================================
+    
+    // Feedback interno de 1, 2 y 3 estrellas (privado, no público)
+    match /feedbackInterno/{feedbackId} {
+      allow read: if isSuperAdmin() || (
+        isAdmin() && resource.data.negocioId == getUserData().negocioId
+      );
+      
+      allow create: if isClienteActivo() &&
+        request.resource.data.usuarioId == request.auth.uid &&
+        request.resource.data.keys().hasOnly([
+          'usuarioId', 'clienteId', 'turnoId', 'negocioId', 'calificacion', 'comentario', 'creadoEn'
+        ]) &&
+        exists(/databases/$(database)/documents/clientes/$(request.resource.data.clienteId)) &&
+        get(/databases/$(database)/documents/clientes/$(request.resource.data.clienteId)).data.usuarioId == request.auth.uid &&
+        request.resource.data.negocioId == get(/databases/$(database)/documents/clientes/$(request.resource.data.clienteId)).data.negocioId &&
+        request.resource.data.calificacion in [1, 2, 3] &&
+        request.resource.data.comentario is string &&
+        request.resource.data.comentario.size() > 0 &&
+        request.resource.data.creadoEn is string &&
+        (
+          !('turnoId' in request.resource.data) ||
+          request.resource.data.turnoId == null ||
+          request.resource.data.turnoId == '' ||
+          (
+            exists(/databases/$(database)/documents/turnos/$(request.resource.data.turnoId)) &&
+            get(/databases/$(database)/documents/turnos/$(request.resource.data.turnoId)).data.clienteId == request.resource.data.clienteId &&
+            get(/databases/$(database)/documents/turnos/$(request.resource.data.turnoId)).data.estado == 'completado'
+          )
+        );
+
+      allow update, delete: if isSuperAdmin();
+    }
+
+    // Reseñas públicas anonimizadas (sin datos personales, calificación 4 o 5)
+    match /reseñasPublicas/{resenaId} {
+      allow read: if true;
+      
+      // Creación y publicación exclusivamente reservada a SuperAdmin o Cloud Function / Admin SDK
+      allow create: if isSuperAdmin() &&
+        request.resource.data.keys().hasOnly([
+          'negocioId', 'calificacion', 'textoPublico', 'fecha', 'publicada'
+        ]) &&
+        request.resource.data.negocioId is string &&
+        request.resource.data.calificacion in [4, 5] &&
+        request.resource.data.textoPublico is string &&
+        request.resource.data.fecha is string &&
+        request.resource.data.publicada is bool;
+
+      allow update: if isSuperAdmin() &&
+        request.resource.data.keys().hasOnly([
+          'negocioId', 'calificacion', 'textoPublico', 'fecha', 'publicada'
+        ]) &&
+        request.resource.data.calificacion in [4, 5];
+
+      allow delete: if isSuperAdmin();
+    }
+
+    // Colecciones legadas protegidas contra lectura/creación no autorizada
     match /reseñas/{resenaId} {
-      allow read, write: if true;
+      allow read: if isSuperAdmin() || (isAdmin() && resource.data.negocioId == getUserData().negocioId);
+      allow write: if false;
     }
     match /resenas/{resenaId} {
-      allow read, write: if true;
+      allow read: if isSuperAdmin() || (isAdmin() && resource.data.negocioId == getUserData().negocioId);
+      allow write: if false;
     }
 
-    // Modo Sandbox y configuración de prueba
-    match /modoSandbox/{docId} {
-      allow read, write: if true;
+    // =========================================================================
+    // 9. TOKENS PUSH & NOTIFICACIONES
+    // =========================================================================
+    match /tokensPush/{tokenId} {
+      allow read: if isSuperAdmin() || (
+        isSignedIn() && resource.data.usuarioId == request.auth.uid
+      );
+
+      allow create: if isSignedIn() &&
+        request.resource.data.usuarioId == request.auth.uid &&
+        request.resource.data.keys().hasOnly([
+          'usuarioId', 'token', 'plataforma', 'creadoEn', 'actualizadoEn'
+        ]) &&
+        request.resource.data.token is string &&
+        request.resource.data.token.size() > 0;
+
+      allow update: if isSignedIn() &&
+        resource.data.usuarioId == request.auth.uid &&
+        request.resource.data.usuarioId == resource.data.usuarioId &&
+        request.resource.data.keys().hasOnly([
+          'usuarioId', 'token', 'plataforma', 'creadoEn', 'actualizadoEn'
+        ]);
+
+      allow delete: if isSignedIn() &&
+        resource.data.usuarioId == request.auth.uid;
     }
 
-    // Registro de emails simulados en modo sandbox
+    match /notificaciones/{notifId} {
+      // Lectura exclusiva para SuperAdmin y Admin del respectivo negocio
+      allow read: if isSuperAdmin() || (
+        isAdmin() && resource.data.negocioId == getUserData().negocioId
+      );
+      // Escritura cerrada por completo desde el cliente:
+      // La creación y actualización se gestiona desde Cloud Functions / Admin SDK
+      allow write: if false;
+    }
+
+    // =========================================================================
+    // 10. AUDITORÍA, LOGS Y COMUNICACIONES (SOLO LECTURA SUPERADMIN)
+    // Las escrituras deben originarse exclusivamente vía Cloud Functions / Admin SDK
+    // =========================================================================
+    match /auditoria/{logId} {
+      allow read: if isSuperAdmin();
+      allow write: if false;
+    }
+
+    match /logsEmails/{logId} {
+      allow read: if isSuperAdmin();
+      allow write: if false;
+    }
+
+    match /logsCancelaciones/{logId} {
+      allow read: if isSuperAdmin();
+      allow write: if false;
+    }
+
     match /emailsSimulados/{emailId} {
-      allow read, write: if true;
+      allow read: if isSuperAdmin();
+      allow write: if false;
     }
 
-    // Fallback default
+    // Colección 'mail' (Firebase Extensions Trigger Email) cerrada a clientes
+    match /mail/{mailId} {
+      allow read, write: if false;
+    }
+
+    // =========================================================================
+    // 11. ROLES SUPERADMIN & TABLAS DE APOYO
+    // =========================================================================
+    match /superAdmins/{uid} {
+      allow read: if isSuperAdmin();
+      allow write: if false;
+    }
+
+    match /modoSandbox/{docId} {
+      allow read, write: if isSuperAdmin();
+    }
+
+    match /presupuestos/{presupuestoId} {
+      allow read: if isSuperAdmin() || (
+        isAdmin() && resource.data.negocioId == getUserData().negocioId
+      );
+      allow create: if isSuperAdmin() || (
+        isAdmin() && request.resource.data.negocioId == getUserData().negocioId
+      );
+      allow update: if isSuperAdmin() || (
+        isAdmin() &&
+        resource.data.negocioId == getUserData().negocioId &&
+        request.resource.data.negocioId == resource.data.negocioId
+      );
+      allow delete: if isSuperAdmin() || (
+        isAdmin() && resource.data.negocioId == getUserData().negocioId
+      );
+    }
+
+    match /plantillasPresupuesto/{plantillaId} {
+      allow read: if isSuperAdmin() || (
+        isAdmin() && resource.data.negocioId == getUserData().negocioId
+      );
+      allow create: if isSuperAdmin() || (
+        isAdmin() && request.resource.data.negocioId == getUserData().negocioId
+      );
+      allow update: if isSuperAdmin() || (
+        isAdmin() &&
+        resource.data.negocioId == getUserData().negocioId &&
+        request.resource.data.negocioId == resource.data.negocioId
+      );
+      allow delete: if isSuperAdmin() || (
+        isAdmin() && resource.data.negocioId == getUserData().negocioId
+      );
+    }
+
+    match /tarifas/{docId} {
+      allow read: if isSuperAdmin() || (
+        isAdmin() && resource.data.negocioId == getUserData().negocioId
+      );
+      allow create: if isSuperAdmin() || (
+        isAdmin() && request.resource.data.negocioId == getUserData().negocioId
+      );
+      allow update: if isSuperAdmin() || (
+        isAdmin() &&
+        resource.data.negocioId == getUserData().negocioId &&
+        request.resource.data.negocioId == resource.data.negocioId
+      );
+      allow delete: if isSuperAdmin() || (
+        isAdmin() && resource.data.negocioId == getUserData().negocioId
+      );
+    }
+
+    match /fidelidad/{docId} {
+      allow read: if isSuperAdmin() || (
+        isAdmin() && resource.data.negocioId == getUserData().negocioId
+      );
+      allow create: if isSuperAdmin() || (
+        isAdmin() && request.resource.data.negocioId == getUserData().negocioId
+      );
+      allow update: if isSuperAdmin() || (
+        isAdmin() &&
+        resource.data.negocioId == getUserData().negocioId &&
+        request.resource.data.negocioId == resource.data.negocioId
+      );
+      allow delete: if isSuperAdmin() || (
+        isAdmin() && resource.data.negocioId == getUserData().negocioId
+      );
+    }
+
+    // =========================================================================
+    // 12. FALLBACK ESTRICTO: DENEGACIÓN TOTAL POR DEFECTO
+    // =========================================================================
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
   }
 }
-

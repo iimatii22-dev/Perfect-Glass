@@ -1,5 +1,40 @@
 export type PlanNegocio = 'demo' | 'básico' | 'premium';
 
+export type EstadoUsuario = 'activo' | 'pendiente' | 'suspendido';
+
+export interface Usuario {
+  uid: string;
+  email: string;
+  rol: UserRole; // 'superadmin' | 'admin' | 'cliente'
+  negocioId: string | null;
+  estado: EstadoUsuario; // 'activo' | 'pendiente' | 'suspendido'
+  creadoEn: string;
+  nombre?: string;
+  telefono?: string;
+  actualizadoEn?: string;
+}
+
+export interface RegistroAuditoria {
+  id?: string;
+  superAdminUid?: string;
+  superAdminEmail: string;
+  accion:
+    | 'activar_negocio'
+    | 'suspender_negocio'
+    | 'cambiar_plan'
+    | 'crear_negocio'
+    | 'modificar_negocio'
+    | 'impersonar_vista'
+    | 'impersonar_soporte'
+    | 'aprobar_cliente'
+    | 'rechazar_cliente'
+    | 'suspender_usuario'
+    | 'eliminar_negocio';
+  negocioId?: string;
+  detalles: Record<string, any>;
+  fecha: string;
+}
+
 export interface Negocio {
   id: string; // ID del documento en la colección 'negocios' (ej: 'perfect-glass')
   nombreNegocio: string;
@@ -14,6 +49,11 @@ export interface Negocio {
   fechaCreacion: string; // Timestamp ISO
   activo: boolean; // Estado activo/inactivo del negocio
   plan: PlanNegocio | string; // 'demo', 'básico', 'premium'
+  
+  // Código único e invitación no adivinable de clientes
+  codigoInvitacion?: string; // Código alfanumérico único para registro de clientes
+  slug?: string; // Slug amigable del negocio
+  estado?: 'activo' | 'suspendido';
   
   // Fidelidad
   sellosNecesarios?: number; // Default 5
@@ -32,13 +72,19 @@ export interface Negocio {
   solicitarResenasAuto?: boolean; // Sí/No envío automático tras visita
   diasMinimosEntreResenas?: number; // Frecuencia mínima en días (default 90)
 
-  // Notificaciones Push y Email
+  // Notificaciones Push y Email (Cloud Functions 2nd Gen + Resend)
   notificacionesPushActivas?: boolean; // Default true
   emailsActivos?: boolean; // Default true
+  enviarEmailsAutomaticos?: boolean; // Default true
+  enviarNotificacionesPush?: boolean; // Default true
+  emailRemitente?: string; // Email remitente configurado en Resend (ej: turnos@perfectglass.app)
+  dominioRemitente?: string; // Dominio del negocio verificado en Resend
+  linkAgendamientoPublico?: string; // Enlace público para que los clientes reserven
+  esSandbox?: boolean; // Si está activo, simula los envíos en 'emailsSimulados'
   pushSilencioInicio?: string; // Default "20:00"
   pushSilencioFin?: string; // Default "08:00"
 
-  updatedAt?: string;
+  actualizadoEn?: string;
   updatedBy?: string;
 }
 
@@ -48,14 +94,20 @@ export interface NegocioMetricas {
   totalClientes: number;
   visitasCompletadasMes: number;
   turnosMes: number;
+  turnosProximos: number;
+  totalResenas: number;
   presupuestosMes: number;
+  turnosEsteMes?: number;
+  visitasEsteMes?: number;
 }
 
 export interface SuperAdminRecord {
-  id: string;
+  id: string; // Document ID (UID)
+  uid?: string;
   email: string;
   nombre?: string;
   activo?: boolean;
+  creadoEn?: string;
   fechaAlta?: string;
 }
 
@@ -147,7 +199,7 @@ export interface VisitaRegistro {
   fotoDespues?: string;
   selloOtorgado?: boolean;
   completadoPor?: string;
-  createdAt?: string;
+  creadoEn?: string;
 }
 
 export interface Cliente {
@@ -156,19 +208,19 @@ export interface Cliente {
   nombre: string;
   telefono: string;
   direccion: string;
-  zona: string; // Barrio o zona geográfica
-  tipoSuperficie: string; // ej: "ventanas", "vidrieras comerciales", "cancel de baño"
-  frecuenciaVisitaDias: number; // 30, 60, 90, etc.
+  zona?: string; // Barrio o zona geográfica
+  tipoSuperficie?: string; // ej: "ventanas", "vidrieras comerciales", "cancel de baño"
+  frecuenciaVisitaDias?: number; // 30, 60, 90, etc.
   duracionServicioMinutos?: number; // Duración del servicio para este cliente (def: 30)
-  fechaUltimaVisita: string; // YYYY-MM-DD
-  fechaProximaVisita: string; // YYYY-MM-DD
-  notas: string;
+  fechaUltimaVisita?: string; // YYYY-MM-DD
+  fechaProximaVisita?: string; // YYYY-MM-DD
+  notas?: string;
   fotoAntes?: string;
   fotoDespues?: string;
-  activo: boolean;
+  activo?: boolean;
   
   // Auth & Roles (Cliente Portal)
-  uid?: string | null; // ID de Firebase Auth del cliente
+  usuarioId?: string | null; // ID de Firebase Auth del usuario cliente (request.auth.uid)
   emailRegistro?: string | null; // Email usado para el registro
   localComercial?: string; // Nombre del comercio o casa del cliente
   estadoRegistro?: 'pendiente' | 'aprobado' | 'rechazado' | null;
@@ -189,12 +241,31 @@ export interface Cliente {
   esSandbox?: boolean; // Marca datos de prueba/simulación
 
   historialVisitas?: VisitaRegistro[];
-  createdAt?: string;
-  updatedAt?: string;
+  creadoEn?: string;
+  actualizadoEn?: string;
   updatedBy?: string;
 }
 
-export type TurnoEstado = 'confirmado' | 'cancelado' | 'completado';
+export type TurnoEstado = 'pendiente' | 'confirmado' | 'cancelado' | 'completado';
+
+export type TipoNotificacion =
+  | 'reserva_creada'
+  | 'reserva_confirmada'
+  | 'trabajo_completado'
+  | 'reseña_solicitada';
+
+export interface NotificacionInterna {
+  id: string;
+  destinatarioUid: string;
+  negocioId: string;
+  tipo: TipoNotificacion;
+  titulo: string;
+  mensaje: string;
+  turnoId: string;
+  leida: boolean;
+  creadaEn: any;
+  leidaEn: any | null;
+}
 
 export interface Turno {
   id: string;
@@ -203,7 +274,8 @@ export interface Turno {
   nombreCliente: string;
   telefonoCliente: string;
   emailCliente: string;
-  direccion?: string;
+  direccionServicio?: string; // Dirección donde se realiza el servicio
+  direccion?: string; // Compatibilidad
   fecha: string; // YYYY-MM-DD
   horaInicio: string; // HH:mm (ej: "09:30")
   horaFin: string; // HH:mm (ej: "10:00")
@@ -214,18 +286,50 @@ export interface Turno {
   // Modo Sandbox
   esSandbox?: boolean; // Turno creado en modo sandbox o demo
 
-  // Campos de cancelación y notificaciones por email y push
-  tokenCancelacion: string; // Texto, único, generado automáticamente (32 caracteres)
-  emailEnviado: boolean; // Booleano, true cuando se envió el email de confirmación
-  notificacionEnviada?: boolean; // Booleano, true para evitar duplicar alertas push
-  recordatorioEnviado?: boolean; // Booleano, true si ya se envió el recordatorio de 24h
+  // Cloud Functions 2nd Gen + Resend cancellation & email tracking
+  tokenCancelacionHash?: string; // Hash SHA-256 del token seguro de cancelación
+  tokenCancelacion?: string; // Token original sólo en memoria / compatibilidad
+  emailConfirmacionEnviado?: boolean; // True si Cloud Function envió el correo de confirmación
+  emailCancelacionEnviado?: boolean; // True si se notificó la cancelación al vidriero
   fechaCancelacion: string | null; // Timestamp ISO, null hasta que se cancele
 
-  cancelToken?: string; // Alias de compatibilidad hacia atrás
+  // Compatibilidad con versiones previas
+  emailEnviado?: boolean;
+  notificacionEnviada?: boolean;
+  recordatorioEnviado?: boolean;
+  cancelToken?: string;
   creadoEn?: string;
   completadoEn?: string;
   canceladoEn?: string;
   motivoCancelacion?: string;
+}
+
+export interface LogEmail {
+  id?: string;
+  destinatario: string;
+  asunto: string;
+  tipo: 'confirmacion_cliente' | 'aviso_vidriero' | 'cancelacion_cliente' | 'cancelacion_vidriero';
+  negocioId: string;
+  turnoId?: string;
+  estado: 'enviado' | 'error' | 'simulado';
+  error?: string | null;
+  resendId?: string | null;
+  fecha: string;
+  esSandbox?: boolean;
+}
+
+export interface LogCancelacion {
+  id?: string;
+  turnoId: string;
+  negocioId: string;
+  fechaCancelacion: string;
+  nombreCliente: string;
+  emailCliente: string;
+  origen: 'http_function' | 'public_app' | 'admin';
+  exito: boolean;
+  error?: string | null;
+  ip?: string | null;
+  userAgent?: string | null;
 }
 
 export interface Resena {
@@ -268,6 +372,7 @@ export interface EmailSimulado {
 export interface TokenPush {
   id: string; // ID del documento en 'tokensPush' (generalmente el uid del usuario)
   uid: string;
+  usuarioId?: string;
   negocioId?: string;
   email?: string | null;
   rol: UserRole; // 'admin' (vidriero) | 'cliente' | 'superadmin'

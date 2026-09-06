@@ -28,6 +28,7 @@ import {
 import { useAuth } from '../../contexts/AuthContext';
 import { useConfig } from '../../contexts/ConfigContext';
 import { Cliente, SelloHistorial } from '../../types';
+import { NotificacionesBell } from '../notificaciones/NotificacionesBell';
 import { 
   subscribeToSellosHistorial, 
   updateClienteProfileByClient 
@@ -181,7 +182,6 @@ export function ClientDashboard({ onOpenBooking }: ClientDashboardProps) {
         telefono,
         direccion,
         localComercial,
-        notas,
       });
       setIsEditingProfile(false);
       setProfileSuccessMsg(true);
@@ -223,6 +223,12 @@ export function ClientDashboard({ onOpenBooking }: ClientDashboardProps) {
           </div>
 
           <div className="flex items-center gap-2">
+            <NotificacionesBell
+              usuarioUid={user?.uid || clienteData?.usuarioId}
+              onNavegarATurno={(_turnoId) => {
+                if (onOpenBooking) onOpenBooking();
+              }}
+            />
             <button
               type="button"
               id="btn-client-logout"

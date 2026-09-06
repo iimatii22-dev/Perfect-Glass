@@ -22,6 +22,7 @@ import {
   MessageCircle,
 } from 'lucide-react';
 import { useConfig } from '../../contexts/ConfigContext';
+import { useAuth } from '../../contexts/AuthContext';
 import { Turno, BusinessConfig, TurnoEstado } from '../../types';
 import {
   getTodayISODate,
@@ -56,6 +57,7 @@ export function PublicBookingPage({
   initialCancelToken,
 }: PublicBookingPageProps) {
   const { config } = useConfig();
+  const { user, clienteData } = useAuth();
   const primaryColor = config.colorPrimario || '#0284c7';
   const todayStr = getTodayISODate();
 
@@ -67,10 +69,10 @@ export function PublicBookingPage({
   const [selectedSlot, setSelectedSlot] = useState<HorarioDisponibleInfo | null>(null);
 
   // Client info form
-  const [nombreCliente, setNombreCliente] = useState('');
-  const [telefonoCliente, setTelefonoCliente] = useState('');
-  const [emailCliente, setEmailCliente] = useState('');
-  const [direccion, setDireccion] = useState('');
+  const [nombreCliente, setNombreCliente] = useState(clienteData?.nombre || '');
+  const [telefonoCliente, setTelefonoCliente] = useState(clienteData?.telefono || '');
+  const [emailCliente, setEmailCliente] = useState(clienteData?.emailRegistro || user?.email || '');
+  const [direccion, setDireccion] = useState(clienteData?.direccion || '');
   const [notas, setNotas] = useState('');
 
   // Turnos real-time sync for slot collision checking
@@ -159,6 +161,8 @@ export function PublicBookingPage({
     try {
       const nuevo = await createTurno(
         {
+          clienteId: clienteData?.id || 'nuevoCliente',
+          clienteUid: user?.uid,
           nombreCliente: nombreCliente.trim(),
           telefonoCliente: telefonoCliente.trim(),
           emailCliente: emailCliente.trim(),
@@ -167,6 +171,7 @@ export function PublicBookingPage({
           horaInicio: selectedSlot.horaInicio,
           duracionMinutos: config.duracionServicioDefaultMinutos || 30,
           notas: notas.trim(),
+          estado: 'pendiente',
         },
         config
       );

@@ -17,6 +17,7 @@ import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { db, storage } from './firebase';
 import { Cliente, VisitaRegistro, SelloHistorial } from '../types';
 import { calcularProximaVisita, getTodayISODate } from '../utils/dateUtils';
+import { actualizarEstadoUsuario } from './usuariosService';
 
 const CLIENTES_COLLECTION = 'clientes';
 const SELLOS_SUBCOLLECTION = 'sellosHistorial';
@@ -52,7 +53,7 @@ const SAMPLE_CLIENTES: Omit<Cliente, 'id'>[] = [
         notas: 'Limpieza profunda de vidrieras exteriores e interiores. Se completó el 5° sello.',
         selloOtorgado: true,
         completadoPor: 'vidriero',
-        createdAt: '2026-07-28T10:30:00Z',
+        creadoEn: '2026-07-28T10:30:00Z',
       },
       {
         id: 'v-sample-2',
@@ -60,7 +61,7 @@ const SAMPLE_CLIENTES: Omit<Cliente, 'id'>[] = [
         notas: 'Visita mensual. Impecable terminación sin marcas.',
         selloOtorgado: true,
         completadoPor: 'vidriero',
-        createdAt: '2026-06-28T09:45:00Z',
+        creadoEn: '2026-06-28T09:45:00Z',
       },
     ],
   },
@@ -92,7 +93,7 @@ const SAMPLE_CLIENTES: Omit<Cliente, 'id'>[] = [
         notas: 'Limpieza de ventanales doble hoja y pulido de mampara del baño principal.',
         selloOtorgado: true,
         completadoPor: 'vidriero',
-        createdAt: '2026-07-03T14:15:00Z',
+        creadoEn: '2026-07-03T14:15:00Z',
       },
     ],
   },
@@ -124,7 +125,7 @@ const SAMPLE_CLIENTES: Omit<Cliente, 'id'>[] = [
         notas: 'Limpieza general de 12 paneles vidriados interiores y ventanales externos.',
         selloOtorgado: true,
         completadoPor: 'vidriero',
-        createdAt: '2026-08-08T11:00:00Z',
+        creadoEn: '2026-08-08T11:00:00Z',
       },
     ],
   },
@@ -156,7 +157,7 @@ const SAMPLE_CLIENTES: Omit<Cliente, 'id'>[] = [
         notas: 'Servicio trimestral completo con hidrolavado suave de marcos de aluminio.',
         selloOtorgado: true,
         completadoPor: 'vidriero',
-        createdAt: '2026-07-15T15:30:00Z',
+        creadoEn: '2026-07-15T15:30:00Z',
       },
     ],
   },
@@ -237,7 +238,7 @@ export function subscribeToClienteByUid(
   callback: (cliente: Cliente | null) => void
 ): () => void {
   const clientesRef = collection(db, CLIENTES_COLLECTION);
-  const q = query(clientesRef, where('uid', '==', uid));
+  const q = query(clientesRef, where('usuarioId', '==', uid));
 
   return onSnapshot(q, (snapshot) => {
     if (snapshot.empty) {
@@ -367,8 +368,8 @@ async function seedInitialClientes(negocioId: string = 'perfect-glass'): Promise
       const docRef = await addDoc(clientesRef, cleanFirestorePayload({
         ...item,
         negocioId,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        creadoEn: new Date().toISOString(),
+        actualizadoEn: new Date().toISOString(),
       }));
 
       // Seed initial sample stamps into sellosHistorial subcollection
@@ -376,7 +377,7 @@ async function seedInitialClientes(negocioId: string = 'perfect-glass'): Promise
         for (const v of item.historialVisitas) {
           if (v.selloOtorgado) {
             await addDoc(collection(db, CLIENTES_COLLECTION, docRef.id, SELLOS_SUBCOLLECTION), {
-              fecha: v.createdAt || new Date().toISOString(),
+              fecha: v.creadoEn || new Date().toISOString(),
               otorgadoPor: 'vidriero',
               visible: true,
               tipo: 'visita',
@@ -401,35 +402,25 @@ export async function registrarNuevoCliente(data: {
   nombre: string;
   telefono: string;
   localComercial: string;
-  negocioId?: string;
+  negocioId: string;
+  direccion?: string;
 }): Promise<string> {
   const clientesRef = collection(db, CLIENTES_COLLECTION);
-  const fechaHoy = getTodayISODate();
   
   const rawDoc: Record<string, any> = {
-    uid: data.uid,
-    emailRegistro: data.email,
-    nombre: data.nombre,
-    telefono: data.telefono,
-    localComercial: data.localComercial,
-    negocioId: data.negocioId || 'perfect-glass',
-    estadoRegistro: 'pendiente', // Pending approval by vidriero
-    direccion: '', // Completed by vidriero upon approval
-    zona: '',
-    tipoSuperficie: 'Ventanas y vidrieras',
-    frecuenciaVisitaDias: 30,
-    duracionServicioMinutos: 30,
-    fechaUltimaVisita: fechaHoy,
-    fechaProximaVisita: calcularProximaVisita(fechaHoy, 30),
-    notas: `Solicitud de registro web para ${data.localComercial}`,
-    activo: true,
+    usuarioId: data.uid,
+    negocioId: data.negocioId.trim(),
+    email: data.email.trim(),
+    emailRegistro: data.email.trim(),
+    nombre: data.nombre.trim(),
+    telefono: data.telefono.trim(),
+    direccion: data.direccion?.trim() || '',
+    localComercial: data.localComercial.trim(),
+    estadoRegistro: 'pendiente',
     sellosAcumulados: 0,
-    sellosNecesarios: 5,
-    recompensaDescripcion: 'Limpieza de vidrios gratis',
     recompensaDisponible: false,
-    totalRecompensasCanjeadas: 0,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    creadoEn: new Date().toISOString(),
+    actualizadoEn: new Date().toISOString(),
   };
 
   const newDoc = cleanFirestorePayload(rawDoc);
@@ -471,20 +462,21 @@ export async function aprobarSolicitudCliente(
   const timestamp = new Date().toISOString();
 
   if (vincularAClienteId) {
-    // 1. Get the pending registration data to extract uid and email
+    // 1. Get the pending registration data to extract usuarioId and email
     const pendingDocRef = doc(db, CLIENTES_COLLECTION, solicitudId);
     const pendingSnap = await getDoc(pendingDocRef);
     const pendingData = pendingSnap.data() || {};
+    const clientUid = pendingData.usuarioId || configData.usuarioId;
 
-    // 2. Update existing client record with uid, emailRegistro, localComercial and approve
+    // 2. Update existing client record with usuarioId, emailRegistro, localComercial and approve
     const existingDocRef = doc(db, CLIENTES_COLLECTION, vincularAClienteId);
     const updates: Record<string, any> = {
-      uid: pendingData.uid || configData.uid,
+      usuarioId: clientUid,
       emailRegistro: pendingData.emailRegistro || configData.emailRegistro,
       localComercial: pendingData.localComercial || configData.localComercial,
       estadoRegistro: 'aprobado',
       ...configData,
-      updatedAt: timestamp,
+      actualizadoEn: timestamp,
       updatedBy: userId || 'vidriero',
     };
 
@@ -494,16 +486,30 @@ export async function aprobarSolicitudCliente(
     if (solicitudId !== vincularAClienteId) {
       await deleteDoc(pendingDocRef);
     }
+
+    // 4. Update user state in usuarios/{uid}
+    if (clientUid) {
+      await actualizarEstadoUsuario(clientUid, 'activo').catch(console.warn);
+    }
   } else {
     // Approve the new client doc directly
     const clientDocRef = doc(db, CLIENTES_COLLECTION, solicitudId);
+    const clientSnap = await getDoc(clientDocRef);
+    const clientData = clientSnap.data() || {};
+    const clientUid = clientData.usuarioId || configData.usuarioId;
+
     const updates: Record<string, any> = {
       estadoRegistro: 'aprobado',
       ...configData,
-      updatedAt: timestamp,
+      actualizadoEn: timestamp,
       updatedBy: userId || 'vidriero',
     };
     await updateDoc(clientDocRef, cleanFirestorePayload(updates));
+
+    // Update user state in usuarios/{uid}
+    if (clientUid) {
+      await actualizarEstadoUsuario(clientUid, 'activo').catch(console.warn);
+    }
   }
 }
 
@@ -516,18 +522,26 @@ export async function rechazarSolicitudCliente(
   userId?: string
 ): Promise<void> {
   const clientDocRef = doc(db, CLIENTES_COLLECTION, solicitudId);
+  const clientSnap = await getDoc(clientDocRef);
+  const clientData = clientSnap.data() || {};
+  const clientUid = clientData.usuarioId;
+
   const updates: Record<string, any> = {
     estadoRegistro: 'rechazado',
     notas: motivo ? `Rechazado: ${motivo}` : 'Solicitud no aprobada',
-    updatedAt: new Date().toISOString(),
+    actualizadoEn: new Date().toISOString(),
     updatedBy: userId || 'vidriero',
   };
   await updateDoc(clientDocRef, cleanFirestorePayload(updates));
+
+  if (clientUid) {
+    await actualizarEstadoUsuario(clientUid, 'suspendido').catch(console.warn);
+  }
 }
 
 /**
  * Safe profile update invoked from the Client Portal.
- * Only modifies non-sensitive profile info (name, phone, localComercial).
+ * Only modifies non-sensitive profile info (name, phone, localComercial, direccion).
  * Strictly forbids modifying stamps, visit dates, or approval status.
  */
 export async function updateClienteProfileByClient(
@@ -537,19 +551,17 @@ export async function updateClienteProfileByClient(
     telefono?: string;
     localComercial?: string;
     direccion?: string;
-    notas?: string;
   }
 ): Promise<void> {
   const clientDocRef = doc(db, CLIENTES_COLLECTION, clienteId);
   const updates: Record<string, any> = {
-    updatedAt: new Date().toISOString(),
+    actualizadoEn: new Date().toISOString(),
   };
 
   if (profileData.nombre !== undefined) updates.nombre = profileData.nombre.trim();
   if (profileData.telefono !== undefined) updates.telefono = profileData.telefono.trim();
   if (profileData.localComercial !== undefined) updates.localComercial = profileData.localComercial.trim();
   if (profileData.direccion !== undefined) updates.direccion = profileData.direccion.trim();
-  if (profileData.notas !== undefined) updates.notas = profileData.notas.trim();
 
   await updateDoc(clientDocRef, cleanFirestorePayload(updates));
 }
@@ -584,7 +596,7 @@ export async function addCliente(
     activo: data.activo !== undefined ? Boolean(data.activo) : true,
     
     // Auth & Status
-    uid: data.uid || null,
+    usuarioId: data.usuarioId || null,
     emailRegistro: data.emailRegistro || null,
     localComercial: data.localComercial || data.nombre || '',
     estadoRegistro: data.estadoRegistro || 'aprobado',
@@ -598,8 +610,8 @@ export async function addCliente(
     fechaUltimoCanje: data.fechaUltimoCanje || '',
 
     historialVisitas: data.historialVisitas || [],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    creadoEn: new Date().toISOString(),
+    actualizadoEn: new Date().toISOString(),
     updatedBy: userId || 'vidriero',
   };
 
@@ -621,13 +633,21 @@ export async function updateCliente(
 ): Promise<void> {
   const clientDocRef = doc(db, CLIENTES_COLLECTION, id);
 
-  const updates: any = {
-    ...data,
-    updatedAt: new Date().toISOString(),
-    updatedBy: userId || 'vidriero',
-  };
+  // Solo campos operativos permitidos por las reglas de seguridad para el rol admin
+  const updates: Record<string, any> = {};
+  const allowedKeys: (keyof Cliente)[] = [
+    'nombre', 'telefono', 'direccion', 'localComercial', 'zona',
+    'tipoSuperficie', 'frecuenciaVisitaDias', 'duracionServicioMinutos',
+    'notas', 'estadoRegistro', 'activo', 'fechaProximaVisita'
+  ];
 
-  if (data.fechaUltimaVisita || data.frecuenciaVisitaDias) {
+  for (const key of allowedKeys) {
+    if (data[key] !== undefined) {
+      updates[key] = data[key];
+    }
+  }
+
+  if (data.frecuenciaVisitaDias && !data.fechaProximaVisita) {
     const fechaUltima = data.fechaUltimaVisita || getTodayISODate();
     const frecuencia = data.frecuenciaVisitaDias || 30;
     updates.fechaProximaVisita = calcularProximaVisita(fechaUltima, frecuencia);
@@ -701,7 +721,7 @@ export async function marcarVisitaCompletada(
     notas: visita.notas || 'Visita periódica completada con éxito.',
     selloOtorgado: true,
     completadoPor: 'vidriero',
-    createdAt: new Date().toISOString(),
+    creadoEn: new Date().toISOString(),
   };
 
   if (visita.fotoAntes) nuevoRegistroVisita.fotoAntes = visita.fotoAntes;
@@ -715,7 +735,7 @@ export async function marcarVisitaCompletada(
     recompensaDescripcion: recompensaDescripcion,
     recompensaDisponible: finalRecompensaDisponible,
     historialVisitas: arrayUnion(cleanFirestorePayload(nuevoRegistroVisita)),
-    updatedAt: new Date().toISOString(),
+    actualizadoEn: new Date().toISOString(),
     updatedBy: userId || 'vidriero',
   };
 
@@ -765,7 +785,7 @@ export async function canjearRecompensa(
     fecha: getTodayISODate(),
     notas: `🎁 Recompensa canjeada: ${recompensaDesc}`,
     completadoPor: 'vidriero',
-    createdAt: new Date().toISOString(),
+    creadoEn: new Date().toISOString(),
   };
 
   const updates: Record<string, any> = {
@@ -773,7 +793,7 @@ export async function canjearRecompensa(
     totalRecompensasCanjeadas: totalCanjes,
     fechaUltimoCanje: getTodayISODate(),
     historialVisitas: arrayUnion(cleanFirestorePayload(logRegistro)),
-    updatedAt: new Date().toISOString(),
+    actualizadoEn: new Date().toISOString(),
     updatedBy: userId || 'vidriero',
   };
 
@@ -820,7 +840,7 @@ export async function ajustarSellosCliente(
   const updates: Record<string, any> = {
     sellosAcumulados: finalSellos,
     recompensaDisponible: finalRecompensaDisponible,
-    updatedAt: new Date().toISOString(),
+    actualizadoEn: new Date().toISOString(),
     updatedBy: userId || 'vidriero',
   };
 
@@ -914,7 +934,7 @@ export async function reprogramarClientesFechaBatch(
     const docRef = doc(db, CLIENTES_COLLECTION, id);
     const updates: Record<string, any> = {
       fechaProximaVisita: nuevaFecha,
-      updatedAt: timestamp,
+      actualizadoEn: timestamp,
       updatedBy: userId || 'vidriero',
     };
     batch.update(docRef, cleanFirestorePayload(updates));
@@ -924,20 +944,153 @@ export async function reprogramarClientesFechaBatch(
 }
 
 /**
- * Updates the client's last review request date (ultimoPedidoResena) in Firestore
+ * Real-time subscription to ALL clients across all negocios (SuperAdmin Master View)
  */
-export async function registrarPedidoResenaEnviado(
-  clienteId: string,
-  userId?: string
-): Promise<void> {
-  const docRef = doc(db, CLIENTES_COLLECTION, clienteId);
-  const hoy = getTodayISODate();
-  await updateDoc(docRef, cleanFirestorePayload({
-    ultimoPedidoResena: hoy,
-    updatedAt: new Date().toISOString(),
-    updatedBy: userId || 'vidriero',
-  }));
+export function subscribeToAllClientesGlobal(
+  callback: (clientes: Cliente[]) => void,
+  onError?: (err: any) => void
+): () => void {
+  try {
+    const clientesRef = collection(db, CLIENTES_COLLECTION);
+    return onSnapshot(
+      clientesRef,
+      (snapshot) => {
+        if (snapshot.empty) {
+          const fallbackList: Cliente[] = SAMPLE_CLIENTES.map((c, i) => ({
+            id: `sample-${i + 1}`,
+            negocioId: 'perfect-glass',
+            ...c,
+          }));
+          callback(fallbackList);
+          return;
+        }
+
+        const allDocs: Cliente[] = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        })) as Cliente[];
+
+        callback(allDocs);
+      },
+      (error) => {
+        console.warn('Firestore all clientes subscription error:', error);
+        if (onError) onError(error);
+        const fallbackList: Cliente[] = SAMPLE_CLIENTES.map((c, i) => ({
+          id: `sample-${i + 1}`,
+          negocioId: 'perfect-glass',
+          ...c,
+        }));
+        callback(fallbackList);
+      }
+    );
+  } catch (err) {
+    console.error('Error in subscribeToAllClientesGlobal:', err);
+    if (onError) onError(err);
+    const fallbackList: Cliente[] = SAMPLE_CLIENTES.map((c, i) => ({
+      id: `sample-${i + 1}`,
+      negocioId: 'perfect-glass',
+      ...c,
+    }));
+    callback(fallbackList);
+    return () => {};
+  }
 }
+
+/**
+ * SuperAdmin direct client update - can modify any client profile, stamps, or assign to any negocio
+ */
+export async function superAdminUpdateCliente(
+  id: string,
+  data: Partial<Cliente>
+): Promise<void> {
+  const clientDocRef = doc(db, CLIENTES_COLLECTION, id);
+  const cleanedUpdates = cleanFirestorePayload({
+    ...data,
+    actualizadoEn: new Date().toISOString(),
+    updatedBy: 'superadmin',
+  });
+  await updateDoc(clientDocRef, cleanedUpdates);
+}
+
+/**
+ * SuperAdmin direct client creation under any specific negocio
+ */
+export async function superAdminCreateClienteParaNegocio(
+  negocioId: string,
+  clienteData: {
+    nombre: string;
+    telefono: string;
+    email?: string;
+    direccion?: string;
+    localComercial?: string;
+    zona?: string;
+    tipoSuperficie?: string;
+    frecuenciaVisitaDias?: number;
+    sellosAcumulados?: number;
+    sellosNecesarios?: number;
+    notas?: string;
+    estadoRegistro?: 'aprobado' | 'pendiente';
+  }
+): Promise<string> {
+  const clientesRef = collection(db, CLIENTES_COLLECTION);
+  const hoy = getTodayISODate();
+  const frecuencia = clienteData.frecuenciaVisitaDias || 30;
+
+  const rawDoc: Record<string, any> = {
+    negocioId: negocioId.trim(),
+    nombre: clienteData.nombre.trim(),
+    telefono: clienteData.telefono.trim(),
+    email: (clienteData.email || '').trim(),
+    direccion: (clienteData.direccion || '').trim(),
+    localComercial: (clienteData.localComercial || clienteData.nombre).trim(),
+    zona: (clienteData.zona || 'Centro').trim(),
+    tipoSuperficie: clienteData.tipoSuperficie || 'Vidrieras comerciales',
+    frecuenciaVisitaDias: frecuencia,
+    duracionServicioMinutos: 45,
+    fechaUltimaVisita: hoy,
+    fechaProximaVisita: calcularProximaVisita(hoy, frecuencia),
+    notas: clienteData.notas || '',
+    activo: true,
+    estadoRegistro: clienteData.estadoRegistro || 'aprobado',
+    sellosAcumulados: clienteData.sellosAcumulados || 0,
+    sellosNecesarios: clienteData.sellosNecesarios || 5,
+    recompensaDescripcion: 'Limpieza de vidrios gratis',
+    recompensaDisponible: (clienteData.sellosAcumulados || 0) >= (clienteData.sellosNecesarios || 5),
+    totalRecompensasCanjeadas: 0,
+    creadoEn: new Date().toISOString(),
+    actualizadoEn: new Date().toISOString(),
+    createdBy: 'superadmin',
+  };
+
+  const newDoc = cleanFirestorePayload(rawDoc);
+  const docRef = await addDoc(clientesRef, newDoc);
+  return docRef.id;
+}
+
+/**
+ * SuperAdmin direct client deletion
+ */
+export async function superAdminDeleteCliente(id: string): Promise<void> {
+  const clientDocRef = doc(db, CLIENTES_COLLECTION, id);
+  await deleteDoc(clientDocRef);
+}
+
+/**
+ * Registra que se envió una solicitud de reseña a un cliente
+ */
+export async function registrarPedidoResenaEnviado(clienteId: string): Promise<void> {
+  try {
+    const clientDocRef = doc(db, CLIENTES_COLLECTION, clienteId);
+    await updateDoc(clientDocRef, {
+      ultimoPedidoResenaEnviado: new Date().toISOString(),
+      actualizadoEn: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.warn('Could not record review request in Firestore:', error);
+  }
+}
+
+
 
 
 

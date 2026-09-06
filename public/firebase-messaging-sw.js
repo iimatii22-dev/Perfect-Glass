@@ -1,16 +1,24 @@
-// Firebase Cloud Messaging Service Worker for Perfect Glass PWA
+// Firebase Cloud Messaging Service Worker for Gestion Servicios PWA
 // Provides background push notifications for Vidriero & Clientes
 
 importScripts('https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging-compat.js');
 
+const urlParams = new URLSearchParams(self.location.search);
+const apiKey = urlParams.get('apiKey') || "";
+const authDomain = urlParams.get('authDomain') || "gestion-servicios-uy.firebaseapp.com";
+const projectId = urlParams.get('projectId') || "gestion-servicios-uy";
+const storageBucket = urlParams.get('storageBucket') || "gestion-servicios-uy.firebasestorage.app";
+const messagingSenderId = urlParams.get('messagingSenderId') || "405657363471";
+const appId = urlParams.get('appId') || "1:405657363471:web:41c81daad92c312340ef7a";
+
 firebase.initializeApp({
-  apiKey: "AIzaSyB9Iw0YRhhwSlSwooh1o0LgEJNORTYfvr8",
-  authDomain: "pivotal-moon-fnm9t.firebaseapp.com",
-  projectId: "pivotal-moon-fnm9t",
-  storageBucket: "pivotal-moon-fnm9t.firebasestorage.app",
-  messagingSenderId: "643326574992",
-  appId: "1:643326574992:web:dd96904824e95df6b5f315",
+  apiKey,
+  authDomain,
+  projectId,
+  storageBucket,
+  messagingSenderId,
+  appId,
 });
 
 let messaging = null;

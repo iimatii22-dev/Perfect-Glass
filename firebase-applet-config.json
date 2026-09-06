@@ -1,12 +1,11 @@
 {
-  "projectId": "pivotal-moon-fnm9t",
-  "appId": "1:643326574992:web:dd96904824e95df6b5f315",
-  "apiKey": "AIzaSyB9Iw0YRhhwSlSwooh1o0LgEJNORTYfvr8",
-  "authDomain": "pivotal-moon-fnm9t.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-perfectglass-504e913b-b3d9-434e-9c33-295e2c3bc94e",
-  "storageBucket": "pivotal-moon-fnm9t.firebasestorage.app",
-  "messagingSenderId": "643326574992",
+  "projectId": "gestion-servicios-uy",
+  "appId": "1:405657363471:web:41c81daad92c312340ef7a",
+  "apiKey": "",
+  "authDomain": "gestion-servicios-uy.firebaseapp.com",
+  "storageBucket": "gestion-servicios-uy.firebasestorage.app",
+  "messagingSenderId": "405657363471",
   "measurementId": "",
-  "oAuthClientId": "643326574992-kmr1g20fcfih0evg06eok368uqqrpa2d.apps.googleusercontent.com",
+  "oAuthClientId": "",
   "recaptchaSiteKey": ""
 }

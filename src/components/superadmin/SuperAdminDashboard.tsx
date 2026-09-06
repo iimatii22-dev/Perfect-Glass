@@ -28,8 +28,9 @@ import {
   Power,
   SlidersHorizontal,
   FlaskConical,
+  ShieldAlert,
 } from 'lucide-react';
-import { BusinessConfig, SuperAdminRecord, ModoSandboxConfig } from '../../types';
+import { BusinessConfig, SuperAdminRecord, ModoSandboxConfig, Cliente } from '../../types';
 import {
   subscribeToNegocios,
   crearNuevoNegocio,
@@ -44,11 +45,23 @@ import {
   NegocioMetricas,
 } from '../../lib/negociosService';
 import {
+  subscribeToAllClientesGlobal,
+  superAdminUpdateCliente,
+  superAdminCreateClienteParaNegocio,
+  superAdminDeleteCliente,
+} from '../../lib/clientesService';
+import { registrarAuditoria } from '../../lib/auditoriaService';
+import {
   subscribeModoSandbox,
   setModoSandbox,
   subscribeEmailsSimulados,
 } from '../../lib/sandboxService';
 import { EmailsSimuladosTab } from './EmailsSimuladosTab';
+import { AuditoriaTab } from './AuditoriaTab';
+import { VidrierosYClientesTab } from './VidrierosYClientesTab';
+import { DirectorioClientesTab } from './DirectorioClientesTab';
+import { ModalEditarCliente } from './ModalEditarCliente';
+import { ModalCrearCliente } from './ModalCrearCliente';
 import { useConfig } from '../../contexts/ConfigContext';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -62,10 +75,18 @@ export function SuperAdminDashboard({ onSelectNegocio, onOpenDemo }: SuperAdminD
   const { user } = useAuth();
 
   const [negocios, setNegocios] = useState<BusinessConfig[]>([]);
+  const [allClientes, setAllClientes] = useState<Cliente[]>([]);
   const [metricas, setMetricas] = useState<Record<string, NegocioMetricas>>({});
   const [superAdmins, setSuperAdmins] = useState<SuperAdminRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'negocios' | 'metricas' | 'superadmins' | 'emailsSimulados'>('negocios');
+  const [activeTab, setActiveTab] = useState<
+    'negocios' | 'todosClientes' | 'metricas' | 'superadmins' | 'emailsSimulados' | 'auditoria'
+  >('negocios');
+
+  // Client Modals state
+  const [editingCliente, setEditingCliente] = useState<Cliente | null>(null);
+  const [isModalCrearClienteOpen, setIsModalCrearClienteOpen] = useState(false);
+  const [targetNegocioParaCliente, setTargetNegocioParaCliente] = useState<string>('perfect-glass');
 
   // Modo Sandbox state
   const [sandboxConfig, setSandboxConfig] = useState<ModoSandboxConfig>({ activo: false });
@@ -102,7 +123,7 @@ export function SuperAdminDashboard({ onSelectNegocio, onOpenDemo }: SuperAdminD
   const [isAddingSuperAdmin, setIsAddingSuperAdmin] = useState(false);
   const [superAdminMsg, setSuperAdminMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
-  // Subscribe to negocios, superAdmins and sandbox
+  // Subscribe to negocios, clientes, superAdmins and sandbox
   useEffect(() => {
     setLoading(true);
     const unsubNegocios = subscribeToNegocios((list) => {
@@ -110,6 +131,10 @@ export function SuperAdminDashboard({ onSelectNegocio, onOpenDemo }: SuperAdminD
       setLoading(false);
       // Fetch metrics
       obtenerMetricasGlobalesNegocios(list).then(setMetricas).catch(console.warn);
+    });
+
+    const unsubClientes = subscribeToAllClientesGlobal((clientesList) => {
+      setAllClientes(clientesList);
     });
 
     const unsubSuperAdmins = subscribeToSuperAdmins((admins) => {
@@ -126,6 +151,7 @@ export function SuperAdminDashboard({ onSelectNegocio, onOpenDemo }: SuperAdminD
 
     return () => {
       unsubNegocios();
+      unsubClientes();
       unsubSuperAdmins();
       unsubSandbox();
       unsubEmails();
@@ -247,12 +273,76 @@ export function SuperAdminDashboard({ onSelectNegocio, onOpenDemo }: SuperAdminD
   const handleToggleActivo = async (negocio: BusinessConfig) => {
     if (!negocio.id) return;
     const nuevoEstado = negocio.activo === false;
-    await toggleEstadoNegocio(negocio.id, nuevoEstado);
+    await toggleEstadoNegocio(negocio.id, nuevoEstado, user?.email || undefined);
+    await registrarAuditoria(
+      nuevoEstado ? 'activar_negocio' : 'suspender_negocio',
+      negocio.id,
+      user?.email || 'superadmin',
+      { negocioNombre: negocio.nombreNegocio, nuevoEstado }
+    );
   };
 
-  const handleSelectAndInspect = (negocioId: string) => {
+  const handleSelectAndInspect = async (negocioId: string) => {
     setCurrentNegocioId(negocioId);
+    await registrarAuditoria(
+      'impersonar_soporte',
+      negocioId,
+      user?.email || 'superadmin',
+      { motivo: 'Modo vista segura de soporte técnico y supervisión' }
+    );
     onSelectNegocio(negocioId);
+  };
+
+  const handleSaveCliente = async (id: string, updates: Partial<Cliente>) => {
+    await superAdminUpdateCliente(id, updates);
+    await registrarAuditoria(
+      'modificar_cliente' as any,
+      updates.negocioId || 'perfect-glass',
+      user?.email || 'msosa.illescas94@gmail.com',
+      { clienteId: id, clienteNombre: updates.nombre, updates }
+    );
+  };
+
+  const handleDeleteCliente = async (id: string) => {
+    const c = allClientes.find((x) => x.id === id);
+    await superAdminDeleteCliente(id);
+    await registrarAuditoria(
+      'eliminar_cliente' as any,
+      c?.negocioId || 'perfect-glass',
+      user?.email || 'msosa.illescas94@gmail.com',
+      { clienteId: id, clienteNombre: c?.nombre }
+    );
+  };
+
+  const handleCreateCliente = async (negocioId: string, data: any) => {
+    const newId = await superAdminCreateClienteParaNegocio(negocioId, data);
+    await registrarAuditoria(
+      'crear_cliente' as any,
+      negocioId,
+      user?.email || 'msosa.illescas94@gmail.com',
+      { clienteId: newId, nombre: data.nombre }
+    );
+  };
+
+  const handleEliminarNegocio = async (negocio: BusinessConfig) => {
+    if (!negocio.id) return;
+    if (negocio.id === 'perfect-glass') {
+      alert('No es posible eliminar el negocio matriz principal (Perfect Glass).');
+      return;
+    }
+    if (
+      window.confirm(
+        `¿Confirmas que deseas eliminar permanentemente el negocio "${negocio.nombreNegocio}"? Esta acción no se puede deshacer.`
+      )
+    ) {
+      await eliminarNegocio(negocio.id);
+      await registrarAuditoria(
+        'eliminar_negocio',
+        negocio.id,
+        user?.email || 'msosa.illescas94@gmail.com',
+        { negocioNombre: negocio.nombreNegocio }
+      );
+    }
   };
 
   const handleAddSuperAdmin = async (e: React.FormEvent) => {
@@ -435,46 +525,57 @@ export function SuperAdminDashboard({ onSelectNegocio, onOpenDemo }: SuperAdminD
         </section>
 
         {/* Navigation Tabs */}
-        <div className="flex border-b border-slate-800 gap-6">
+        <div className="flex border-b border-slate-800 gap-6 overflow-x-auto">
           <button
             onClick={() => setActiveTab('negocios')}
-            className={`pb-3 text-sm font-semibold flex items-center gap-2 border-b-2 transition-all ${
+            className={`pb-3 text-sm font-semibold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
               activeTab === 'negocios'
-                ? 'border-indigo-500 text-indigo-400'
+                ? 'border-indigo-500 text-indigo-400 font-bold'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
             <Building2 className="w-4 h-4" />
-            Negocios Registrados ({negocios.length})
+            <span>Vidrieros & Clientes ({negocios.length})</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('todosClientes')}
+            className={`pb-3 text-sm font-semibold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
+              activeTab === 'todosClientes'
+                ? 'border-indigo-500 text-indigo-400 font-bold'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            <span>Directorio Clientes ({allClientes.length})</span>
           </button>
           <button
             onClick={() => setActiveTab('metricas')}
-            className={`pb-3 text-sm font-semibold flex items-center gap-2 border-b-2 transition-all ${
+            className={`pb-3 text-sm font-semibold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
               activeTab === 'metricas'
-                ? 'border-indigo-500 text-indigo-400'
+                ? 'border-indigo-500 text-indigo-400 font-bold'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
             <TrendingUp className="w-4 h-4" />
-            Comparativa de Negocios
+            <span>Métricas Micro SaaS</span>
           </button>
           <button
             onClick={() => setActiveTab('superadmins')}
-            className={`pb-3 text-sm font-semibold flex items-center gap-2 border-b-2 transition-all ${
+            className={`pb-3 text-sm font-semibold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
               activeTab === 'superadmins'
-                ? 'border-indigo-500 text-indigo-400'
+                ? 'border-indigo-500 text-indigo-400 font-bold'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
             <ShieldCheck className="w-4 h-4" />
-            SuperAdmins del Sistema ({superAdmins.length})
+            <span>SuperAdmins ({superAdmins.length})</span>
           </button>
           <button
             id="tab-btn-emails-simulados"
             onClick={() => setActiveTab('emailsSimulados')}
-            className={`pb-3 text-sm font-semibold flex items-center gap-2 border-b-2 transition-all ${
+            className={`pb-3 text-sm font-semibold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
               activeTab === 'emailsSimulados'
-                ? 'border-purple-500 text-purple-400'
+                ? 'border-purple-500 text-purple-400 font-bold'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -484,193 +585,53 @@ export function SuperAdminDashboard({ onSelectNegocio, onOpenDemo }: SuperAdminD
               {emailsSimuladosCount}
             </span>
           </button>
+          <button
+            id="tab-btn-auditoria"
+            onClick={() => setActiveTab('auditoria')}
+            className={`pb-3 text-sm font-semibold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
+              activeTab === 'auditoria'
+                ? 'border-indigo-500 text-indigo-400 font-bold'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <ShieldAlert className="w-4 h-4" />
+            <span>Auditoría</span>
+          </button>
         </div>
 
-        {/* TAB 1: Negocios Registrados */}
+        {/* TAB 1: Vidrieros y Clientes (Árbol Jerárquico Micro SaaS) */}
         {activeTab === 'negocios' && (
-          <div className="space-y-6">
-            {/* Search & Filter Bar */}
-            <div className="flex flex-col sm:flex-row gap-3 items-center justify-between bg-slate-800/40 border border-slate-800 rounded-xl p-3">
-              <div className="relative w-full sm:w-80">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="text"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Buscar por nombre, ID o email..."
-                  className="w-full pl-9 pr-3 py-1.5 text-sm bg-slate-900 border border-slate-700 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-                />
-              </div>
+          <VidrierosYClientesTab
+            negocios={negocios}
+            allClientes={allClientes}
+            metricas={metricas}
+            currentNegocioId={currentNegocioId}
+            onSelectAndInspect={handleSelectAndInspect}
+            onEditNegocio={(n) => setEditingNegocio(n)}
+            onToggleActivo={handleToggleActivo}
+            onEliminarNegocio={handleEliminarNegocio}
+            onEditCliente={(c) => setEditingCliente(c)}
+            onDeleteCliente={handleDeleteCliente}
+            onCrearClienteParaNegocio={(negocioId) => {
+              setTargetNegocioParaCliente(negocioId);
+              setIsModalCrearClienteOpen(true);
+            }}
+            onCrearNegocio={() => setIsModalCrearOpen(true)}
+          />
+        )}
 
-              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-                <div className="flex items-center gap-1.5 text-xs text-slate-400">
-                  <Filter className="w-3.5 h-3.5" /> Plan:
-                </div>
-                <select
-                  value={filterPlan}
-                  onChange={(e) => setFilterPlan(e.target.value)}
-                  className="bg-slate-900 border border-slate-700 rounded-lg text-xs py-1.5 px-2.5 text-slate-200 focus:outline-none focus:border-indigo-500"
-                >
-                  <option value="todos">Todos los planes</option>
-                  <option value="premium">Premium</option>
-                  <option value="pro">Pro</option>
-                  <option value="free">Free</option>
-                </select>
-
-                <select
-                  value={filterEstado}
-                  onChange={(e) => setFilterEstado(e.target.value)}
-                  className="bg-slate-900 border border-slate-700 rounded-lg text-xs py-1.5 px-2.5 text-slate-200 focus:outline-none focus:border-indigo-500"
-                >
-                  <option value="todos">Todos los estados</option>
-                  <option value="activos">Activos</option>
-                  <option value="inactivos">Inactivos</option>
-                </select>
-              </div>
-            </div>
-
-            {/* List of Negocios */}
-            {filteredNegocios.length === 0 ? (
-              <div className="text-center py-12 bg-slate-800/20 border border-dashed border-slate-800 rounded-2xl">
-                <Building2 className="w-12 h-12 mx-auto text-slate-600 mb-3" />
-                <p className="text-slate-300 font-medium">No se encontraron negocios con los filtros aplicados</p>
-                <p className="text-slate-500 text-xs mt-1">Prueba modificando los términos de búsqueda o añade uno nuevo.</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                {filteredNegocios.map((negocio) => {
-                  const m = metricas[negocio.id || ''] || {
-                    totalClientes: 0,
-                    turnosEsteMes: 0,
-                    visitasEsteMes: 0,
-                    solicitudesPendientes: 0,
-                  };
-                  const isCurrent = currentNegocioId === negocio.id;
-
-                  return (
-                    <div
-                      key={negocio.id}
-                      className={`bg-slate-800/70 border rounded-2xl p-5 flex flex-col justify-between transition-all hover:border-slate-600 ${
-                        isCurrent ? 'border-indigo-500/80 ring-2 ring-indigo-500/20 shadow-lg shadow-indigo-950/40' : 'border-slate-700/70'
-                      }`}
-                    >
-                      <div>
-                        {/* Card Header */}
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex items-center gap-3 min-w-0">
-                            <div
-                              className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-sm shadow-md shrink-0"
-                              style={{ backgroundColor: negocio.colorPrimario || '#0284c7' }}
-                            >
-                              {negocio.logoUrl ? (
-                                <img
-                                  src={negocio.logoUrl}
-                                  alt=""
-                                  className="w-10 h-10 rounded-xl object-contain p-1"
-                                />
-                              ) : (
-                                (negocio.nombreNegocio || 'N').substring(0, 2).toUpperCase()
-                              )}
-                            </div>
-                            <div className="min-w-0">
-                              <h3 className="font-bold text-white text-base truncate flex items-center gap-1.5">
-                                {negocio.nombreNegocio}
-                                {isCurrent && (
-                                  <span className="inline-block w-2 h-2 rounded-full bg-indigo-400 shrink-0" title="Negocio seleccionado actualmente" />
-                                )}
-                              </h3>
-                              <p className="text-xs text-slate-400 font-mono truncate">ID: {negocio.id}</p>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <span
-                              className={`px-2 py-0.5 text-xs font-semibold rounded-full uppercase tracking-wider ${
-                                negocio.plan === 'premium'
-                                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                                  : negocio.plan === 'pro'
-                                  ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
-                                  : 'bg-slate-700 text-slate-300'
-                              }`}
-                            >
-                              {negocio.plan || 'pro'}
-                            </span>
-                            <button
-                              onClick={() => handleToggleActivo(negocio)}
-                              title={negocio.activo !== false ? 'Desactivar negocio' : 'Activar negocio'}
-                              className={`p-1 rounded-lg transition-colors ${
-                                negocio.activo !== false
-                                  ? 'text-emerald-400 hover:bg-emerald-500/20'
-                                  : 'text-slate-500 hover:bg-slate-700'
-                              }`}
-                            >
-                              <Power className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Contact info */}
-                        <div className="mt-4 space-y-1.5 text-xs text-slate-300 border-t border-slate-700/50 pt-3">
-                          {negocio.emailAdministrador && (
-                            <div className="flex items-center gap-2 text-slate-300 truncate">
-                              <Mail className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                              <span className="truncate">{negocio.emailAdministrador}</span>
-                            </div>
-                          )}
-                          {negocio.telefono && (
-                            <div className="flex items-center gap-2 text-slate-300 truncate">
-                              <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                              <span>{negocio.telefono}</span>
-                            </div>
-                          )}
-                          {negocio.direccion && (
-                            <div className="flex items-center gap-2 text-slate-400 truncate">
-                              <Globe className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                              <span className="truncate">{negocio.direccion}</span>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Live mini stats */}
-                        <div className="mt-4 grid grid-cols-3 gap-2 bg-slate-900/80 rounded-xl p-2.5 text-center border border-slate-800">
-                          <div>
-                            <div className="text-xs text-slate-400">Clientes</div>
-                            <div className="text-base font-bold text-white mt-0.5">{m.totalClientes}</div>
-                          </div>
-                          <div>
-                            <div className="text-xs text-slate-400">Turnos/Mes</div>
-                            <div className="text-base font-bold text-purple-300 mt-0.5">{m.turnosEsteMes}</div>
-                          </div>
-                          <div>
-                            <div className="text-xs text-slate-400">Visitas/Mes</div>
-                            <div className="text-base font-bold text-emerald-300 mt-0.5">{m.visitasEsteMes}</div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Card Action Buttons */}
-                      <div className="mt-5 pt-3 border-t border-slate-700/50 flex items-center gap-2">
-                        <button
-                          onClick={() => handleSelectAndInspect(negocio.id || 'perfect-glass')}
-                          className="flex-1 py-2 px-3 text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg flex items-center justify-center gap-1.5 transition-colors shadow-sm"
-                        >
-                          <ExternalLink className="w-3.5 h-3.5" />
-                          Acceder al Panel
-                        </button>
-                        <button
-                          onClick={() => setEditingNegocio(negocio)}
-                          className="p-2 text-slate-300 hover:text-white bg-slate-700/70 hover:bg-slate-700 rounded-lg transition-colors"
-                          title="Editar configuración básica"
-                        >
-                          <Edit3 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+        {/* TAB: Directorio Global de Todos los Clientes */}
+        {activeTab === 'todosClientes' && (
+          <DirectorioClientesTab
+            clientes={allClientes}
+            negocios={negocios}
+            onEditCliente={(c) => setEditingCliente(c)}
+            onDeleteCliente={handleDeleteCliente}
+            onCrearCliente={() => {
+              setTargetNegocioParaCliente(negocios[0]?.id || 'perfect-glass');
+              setIsModalCrearClienteOpen(true);
+            }}
+          />
         )}
 
         {/* TAB 2: Métricas y Comparativa */}
@@ -826,8 +787,14 @@ export function SuperAdminDashboard({ onSelectNegocio, onOpenDemo }: SuperAdminD
                                 </span>
                               )}
                             </div>
-                            <div className="text-xs text-slate-500 font-mono">
-                              Autorizado el {new Date(adm.agregadoEn).toLocaleDateString()}
+                            <div className="text-xs text-slate-500 font-mono flex items-center gap-2">
+                              <span>UID: {adm.uid || adm.id}</span>
+                              <span>•</span>
+                              <span>
+                                {adm.creadoEn
+                                  ? `Creado el ${new Date(adm.creadoEn).toLocaleDateString()}`
+                                  : (adm.fechaAlta ? `Creado el ${new Date(adm.fechaAlta).toLocaleDateString()}` : 'Activo')}
+                              </span>
                             </div>
                           </div>
                         </div>
@@ -853,6 +820,11 @@ export function SuperAdminDashboard({ onSelectNegocio, onOpenDemo }: SuperAdminD
         {/* TAB 4: Emails Simulados */}
         {activeTab === 'emailsSimulados' && (
           <EmailsSimuladosTab onGoToDemo={onOpenDemo} />
+        )}
+
+        {/* TAB 5: Auditoría */}
+        {activeTab === 'auditoria' && (
+          <AuditoriaTab />
         )}
       </main>
 
@@ -1130,6 +1102,26 @@ export function SuperAdminDashboard({ onSelectNegocio, onOpenDemo }: SuperAdminD
             </form>
           </div>
         </div>
+      )}
+
+      {/* Modal Editar Cliente (SuperAdmin Master) */}
+      {editingCliente && (
+        <ModalEditarCliente
+          cliente={editingCliente}
+          negocios={negocios}
+          onClose={() => setEditingCliente(null)}
+          onSave={handleSaveCliente}
+        />
+      )}
+
+      {/* Modal Crear Cliente (SuperAdmin Master) */}
+      {isModalCrearClienteOpen && (
+        <ModalCrearCliente
+          negocios={negocios}
+          preselectedNegocioId={targetNegocioParaCliente}
+          onClose={() => setIsModalCrearClienteOpen(false)}
+          onCreate={handleCreateCliente}
+        />
       )}
     </div>
   );

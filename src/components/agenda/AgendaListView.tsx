@@ -30,6 +30,7 @@ interface AgendaListViewProps {
   onMarcarVisita: (cliente: Cliente) => void;
   onOpenReprogramar: (fecha: string, clientes: Cliente[]) => void;
   onCompletarTurno?: (turnoId: string) => void;
+  onConfirmarTurno?: (turnoId: string) => void;
   onCancelarTurno?: (turno: Turno) => void;
   onSelectTurno?: (turno: Turno) => void;
 }
@@ -41,6 +42,7 @@ export function AgendaListView({
   onMarcarVisita,
   onOpenReprogramar,
   onCompletarTurno = () => {},
+  onConfirmarTurno,
   onCancelarTurno = () => {},
   onSelectTurno,
 }: AgendaListViewProps) {
@@ -269,6 +271,7 @@ export function AgendaListView({
                           key={turno.id}
                           turno={turno}
                           onCompletar={onCompletarTurno}
+                          onConfirmar={onConfirmarTurno}
                           onCancelar={onCancelarTurno}
                           onSelect={onSelectTurno}
                         />

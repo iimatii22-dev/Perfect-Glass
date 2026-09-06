@@ -27,6 +27,7 @@ import {
 } from '../../lib/clientesService';
 import {
   subscribeToTurnos,
+  confirmarTurno,
   completarTurno,
   cancelTurno,
 } from '../../lib/turnosService';
@@ -214,11 +215,21 @@ export function AgendaTab() {
     }
   };
 
+  // Handle confirming an online Turno
+  const handleConfirmarTurno = async (turnoId: string) => {
+    try {
+      await confirmarTurno(turnoId, config);
+      showNotification('success', 'Turno confirmado y notificación enviada al cliente.');
+    } catch (error: any) {
+      showNotification('error', `Error al confirmar turno: ${error.message}`);
+    }
+  };
+
   // Handle completing an online Turno
   const handleCompletarTurno = async (turnoId: string) => {
     try {
-      await completarTurno(turnoId);
-      showNotification('success', 'Turno marcado como completado.');
+      await completarTurno(turnoId, config);
+      showNotification('success', 'Turno marcado como completado y notificaciones enviadas.');
     } catch (error: any) {
       showNotification('error', `Error al completar turno: ${error.message}`);
     }
@@ -495,6 +506,7 @@ export function AgendaTab() {
           onMarcarVisita={setVisitaModalCliente}
           onOpenReprogramar={handleOpenReprogramar}
           onCompletarTurno={handleCompletarTurno}
+          onConfirmarTurno={handleConfirmarTurno}
           onCancelarTurno={handleOpenCancelarTurno}
         />
       ) : (
@@ -505,6 +517,7 @@ export function AgendaTab() {
           onMarcarVisita={setVisitaModalCliente}
           onOpenReprogramar={handleOpenReprogramar}
           onCompletarTurno={handleCompletarTurno}
+          onConfirmarTurno={handleConfirmarTurno}
           onCancelarTurno={handleOpenCancelarTurno}
         />
       )}

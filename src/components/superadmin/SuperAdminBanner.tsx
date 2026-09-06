@@ -115,10 +115,10 @@ export function SuperAdminBanner({
               id="btn-banner-open-demo"
               onClick={onOpenDemo}
               className="flex items-center gap-1.5 px-2.5 py-1 bg-purple-900/60 hover:bg-purple-800 text-purple-200 border border-purple-500/40 font-bold rounded-md transition-colors"
-              title="Abrir Laboratorio de Pruebas y Simulación (/demo)"
+              title="Abrir Laboratorio de Pruebas y Simulación (/superadmin/demo)"
             >
               <FlaskConical className="w-3.5 h-3.5 text-purple-400" />
-              <span>Consola Demo (/demo)</span>
+              <span>Consola Demo (/superadmin/demo)</span>
             </button>
           )}
 

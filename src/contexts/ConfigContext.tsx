@@ -28,7 +28,17 @@ export function ConfigProvider({ children }: { children: React.ReactNode }) {
   const [config, setConfig] = useState<BusinessConfig>(DEFAULT_CONFIG);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const { user } = useAuth();
+  const { user, role, negocioId } = useAuth();
+
+  // If user is admin of a specific business, enforce their own negocioId
+  useEffect(() => {
+    if (role === 'admin' && negocioId) {
+      if (currentNegocioId !== negocioId) {
+        setCurrentNegocioId(negocioId);
+        sessionStorage.setItem('perfectglass_current_negocio_id', negocioId);
+      }
+    }
+  }, [role, negocioId, currentNegocioId]);
 
   const handleSetCurrentNegocioId = (id: string) => {
     setCurrentNegocioId(id);
@@ -36,8 +46,13 @@ export function ConfigProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-    setLoading(true);
+    // Timeout de seguridad: Si Firestore tarda en responder, desbloquear loading rápidamente
+    const timer = setTimeout(() => {
+      setLoading(false);
+    }, 500);
+
     const unsubscribe = subscribeToBusinessConfig((updatedConfig) => {
+      clearTimeout(timer);
       setConfig(updatedConfig);
       setLoading(false);
 
