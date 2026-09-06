@@ -42,7 +42,7 @@ export function ClientInvitationCard() {
   };
 
   const handleShareWhatsApp = () => {
-    const text = `¡Hola! Te invito a sumarte a nuestro portal exclusivo de clientes en *${config.nombreNegocio || 'Perfect Glass'}*. Podrás ver tu historial de visitas, solicitar turnos y sumar sellos de fidelidad para obtener limpiezas gratis: ${invitationUrl}`;
+    const text = `¡Hola! Te invito a sumarte a nuestro portal exclusivo de clientes en *${config.nombreNegocio || 'Gestión de Servicios'}*. Podrás ver tu historial de visitas, solicitar turnos y sumar sellos de fidelidad para obtener limpiezas gratis: ${invitationUrl}`;
     const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
     window.open(url, '_blank');
   };

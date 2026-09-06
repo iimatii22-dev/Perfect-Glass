@@ -139,10 +139,45 @@ function AppContent() {
       setActiveTab(tabParam as TabType);
     }
     
-    // Check for client public registration (/registro-cliente or ?registro-cliente=true)
-    const isRegisterClientPath = pathname === '/registro-cliente' || pathname.startsWith('/registro-cliente');
-    const refParam = params.get('ref') || params.get('codigo') || params.get('negocio');
-    if (isRegisterClientPath || params.has('registro-cliente')) {
+    // Check for client public registration (/registro-cliente, /registro, #/registro-cliente, ?registro-cliente=true, or ?ref=...)
+    const hash = window.location.hash || '';
+    const isRegisterClientPath =
+      pathname === '/registro-cliente' ||
+      pathname.startsWith('/registro-cliente') ||
+      pathname === '/registro' ||
+      pathname.startsWith('/registro') ||
+      pathname === '/invitacion' ||
+      pathname.startsWith('/invitacion') ||
+      hash.includes('registro-cliente') ||
+      hash.includes('registro');
+
+    const hashParams = hash.includes('?') ? new URLSearchParams(hash.split('?')[1]) : null;
+    const refParam =
+      params.get('ref') ||
+      params.get('codigo') ||
+      params.get('negocio') ||
+      hashParams?.get('ref') ||
+      hashParams?.get('codigo') ||
+      hashParams?.get('negocio');
+
+    const isExplicitRegister =
+      isRegisterClientPath ||
+      params.has('registro-cliente') ||
+      params.has('registro') ||
+      params.has('invitacion');
+
+    // Si tiene refParam y no está intentando navegar el panel admin ni demo
+    const isRefParamInvitation = Boolean(
+      refParam &&
+      !params.has('tab') &&
+      !params.has('superadmin') &&
+      !params.has('demo') &&
+      !params.has('agendar') &&
+      !params.has('opinion') &&
+      !params.has('cancelar')
+    );
+
+    if (isExplicitRegister || isRefParamInvitation) {
       setIsRegisterClientMode(true);
       if (refParam) {
         setRegisterClientRef(refParam);

@@ -110,7 +110,7 @@ export function PublicClienteRegisterPage({
         nombre: nombre.trim(),
         telefono: telefono.trim(),
         localComercial: localComercial.trim(),
-        refCode: effectiveRefCode.trim(),
+        refCode: (negocio.codigoInvitacion || negocio.id || effectiveRefCode).trim(),
         direccion: direccion.trim() || undefined,
       });
 

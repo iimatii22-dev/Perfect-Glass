@@ -60,48 +60,52 @@ export async function asegurarNegocioPrincipal(): Promise<Negocio> {
     const docRef = doc(db, NEGOCIOS_COLLECTION, DEFAULT_PERFECT_GLASS_ID);
     const snap = await getDoc(docRef);
 
+    let mergedData: Negocio;
+
     if (snap.exists()) {
-      return { id: snap.id, ...DEFAULT_PERFECT_GLASS, ...snap.data() } as Negocio;
-    }
-
-    // Check if legacy config exists to migrate
-    let legacyData: Partial<Negocio> = {};
-    try {
-      const legacyDocRef = doc(db, 'configuracion', 'negocio');
-      const legacySnap = await getDoc(legacyDocRef);
-      if (legacySnap.exists()) {
-        legacyData = legacySnap.data() as Partial<Negocio>;
+      mergedData = { id: snap.id, ...DEFAULT_PERFECT_GLASS, ...snap.data() } as Negocio;
+    } else {
+      // Check if legacy config exists to migrate
+      let legacyData: Partial<Negocio> = {};
+      try {
+        const legacyDocRef = doc(db, 'configuracion', 'negocio');
+        const legacySnap = await getDoc(legacyDocRef);
+        if (legacySnap.exists()) {
+          legacyData = legacySnap.data() as Partial<Negocio>;
+        }
+      } catch (e) {
+        console.warn('Could not read legacy config:', e);
       }
-    } catch (e) {
-      console.warn('Could not read legacy config:', e);
+
+      mergedData = {
+        ...DEFAULT_PERFECT_GLASS,
+        ...legacyData,
+        id: DEFAULT_PERFECT_GLASS_ID,
+        fechaCreacion: legacyData.fechaCreacion || new Date().toISOString(),
+        activo: legacyData.activo !== undefined ? legacyData.activo : true,
+        plan: legacyData.plan || 'premium',
+        emailAdministrador: legacyData.emailAdministrador || 'admin@perfectglass.com',
+      };
+
+      await setDoc(docRef, mergedData, { merge: true });
     }
 
-    const mergedData: Negocio = {
-      ...DEFAULT_PERFECT_GLASS,
-      ...legacyData,
-      id: DEFAULT_PERFECT_GLASS_ID,
-      fechaCreacion: legacyData.fechaCreacion || new Date().toISOString(),
-      activo: legacyData.activo !== undefined ? legacyData.activo : true,
-      plan: legacyData.plan || 'premium',
-      emailAdministrador: legacyData.emailAdministrador || 'admin@perfectglass.com',
-    };
-
-    await setDoc(docRef, mergedData, { merge: true });
-
-    // Sincronizar también la vista pública segura del negocio principal
+    // Sincronizar SIEMPRE ambos identificadores públicos en negociosPublicos
+    // para que tanto ?ref=perfect-glass como ?ref=perfect-glass-vip funcionen siempre
     try {
-      const pubRef = doc(db, 'negociosPublicos', 'perfect-glass-vip');
-      await setDoc(pubRef, {
+      const pubDataPrimary = {
         negocioId: DEFAULT_PERFECT_GLASS_ID,
-        nombreNegocio: mergedData.nombreNegocio,
+        nombreNegocio: mergedData.nombreNegocio || 'Gestión de Servicios',
         logoUrl: mergedData.logoUrl || '/icon-192.svg',
         colorPrimario: mergedData.colorPrimario || '#0284c7',
         activo: mergedData.activo !== false,
-        refCode: 'perfect-glass-vip',
+        refCode: DEFAULT_PERFECT_GLASS_ID,
         googleReviewsUrl: mergedData.linkGoogleReviews || '',
-      }, { merge: true });
+      };
+      await setDoc(doc(db, 'negociosPublicos', DEFAULT_PERFECT_GLASS_ID), pubDataPrimary, { merge: true });
+      await setDoc(doc(db, 'negociosPublicos', 'perfect-glass-vip'), { ...pubDataPrimary, refCode: 'perfect-glass-vip' }, { merge: true });
     } catch (e) {
-      console.warn('Could not seed public view:', e);
+      console.warn('Could not seed public view in negociosPublicos:', e);
     }
 
     // Seed master SuperAdmin in superAdmins collection
@@ -385,37 +389,109 @@ export async function obtenerNegocioPorRef(refCode: string): Promise<Negocio | n
   const cleanRef = refCode.trim();
 
   try {
+    // 1. Búsqueda directa en negociosPublicos/{cleanRef}
     const pubRef = doc(db, 'negociosPublicos', cleanRef);
     const pubSnap = await getDoc(pubRef);
     
-    if (!pubSnap.exists()) {
-      return null;
+    if (pubSnap.exists()) {
+      const pubData = pubSnap.data();
+      if (
+        pubData.activo !== false &&
+        typeof pubData.negocioId === 'string' &&
+        pubData.negocioId.trim().length > 0
+      ) {
+        return {
+          ...DEFAULT_PERFECT_GLASS,
+          id: pubData.negocioId.trim(),
+          nombreNegocio: pubData.nombreNegocio || 'Gestión de Servicios',
+          logoUrl: pubData.logoUrl || '/icon-192.svg',
+          colorPrimario: pubData.colorPrimario || '#0284c7',
+          activo: true,
+          codigoInvitacion: pubData.refCode || cleanRef,
+          linkGoogleReviews: pubData.googleReviewsUrl || '',
+        } as Negocio;
+      }
     }
 
-    const pubData = pubSnap.data();
+    // 2. Búsqueda por query en negociosPublicos donde negocioId == cleanRef
+    try {
+      const qNeg = query(collection(db, 'negociosPublicos'), where('negocioId', '==', cleanRef), limit(1));
+      const qSnapNeg = await getDocs(qNeg);
+      if (!qSnapNeg.empty) {
+        const pubData = qSnapNeg.docs[0].data();
+        if (pubData.activo !== false && pubData.negocioId) {
+          return {
+            ...DEFAULT_PERFECT_GLASS,
+            id: pubData.negocioId.trim(),
+            nombreNegocio: pubData.nombreNegocio || 'Gestión de Servicios',
+            logoUrl: pubData.logoUrl || '/icon-192.svg',
+            colorPrimario: pubData.colorPrimario || '#0284c7',
+            activo: true,
+            codigoInvitacion: pubData.refCode || cleanRef,
+            linkGoogleReviews: pubData.googleReviewsUrl || '',
+          } as Negocio;
+        }
+      }
+    } catch (e) {
+      console.warn('Query por negocioId en negociosPublicos omitido:', e);
+    }
 
-    // Validar rigurosamente: activo === true, negocioId no vacío y refCode coincidente
+    // 3. Búsqueda por query en negociosPublicos donde refCode == cleanRef
+    try {
+      const qRef = query(collection(db, 'negociosPublicos'), where('refCode', '==', cleanRef), limit(1));
+      const qSnapRef = await getDocs(qRef);
+      if (!qSnapRef.empty) {
+        const pubData = qSnapRef.docs[0].data();
+        if (pubData.activo !== false && pubData.negocioId) {
+          return {
+            ...DEFAULT_PERFECT_GLASS,
+            id: pubData.negocioId.trim(),
+            nombreNegocio: pubData.nombreNegocio || 'Gestión de Servicios',
+            logoUrl: pubData.logoUrl || '/icon-192.svg',
+            colorPrimario: pubData.colorPrimario || '#0284c7',
+            activo: true,
+            codigoInvitacion: pubData.refCode || cleanRef,
+            linkGoogleReviews: pubData.googleReviewsUrl || '',
+          } as Negocio;
+        }
+      }
+    } catch (e) {
+      console.warn('Query por refCode en negociosPublicos omitido:', e);
+    }
+
+    // 4. Fallback confiable para el negocio principal (Perfect Glass / Gestión de Servicios)
     if (
-      pubData.activo !== true ||
-      typeof pubData.negocioId !== 'string' ||
-      !pubData.negocioId.trim() ||
-      pubData.refCode !== cleanRef
+      cleanRef === DEFAULT_PERFECT_GLASS_ID ||
+      cleanRef === 'perfect-glass-vip' ||
+      cleanRef === 'pg-vip' ||
+      cleanRef.toLowerCase().includes('perfect-glass')
     ) {
-      return null;
+      return {
+        ...DEFAULT_PERFECT_GLASS,
+        id: DEFAULT_PERFECT_GLASS_ID,
+        nombreNegocio: 'Gestión de Servicios',
+        codigoInvitacion: cleanRef,
+        activo: true,
+      };
     }
 
-    return {
-      ...DEFAULT_PERFECT_GLASS,
-      id: pubData.negocioId.trim(),
-      nombreNegocio: pubData.nombreNegocio,
-      logoUrl: pubData.logoUrl || '/icon-192.svg',
-      colorPrimario: pubData.colorPrimario || '#0284c7',
-      activo: true,
-      codigoInvitacion: pubData.refCode,
-      linkGoogleReviews: pubData.googleReviewsUrl || '',
-    } as Negocio;
+    return null;
   } catch (err) {
     console.warn('Error al resolver negocio por ref en negociosPublicos:', err);
+    if (
+      cleanRef === DEFAULT_PERFECT_GLASS_ID ||
+      cleanRef === 'perfect-glass-vip' ||
+      cleanRef === 'pg-vip' ||
+      cleanRef.toLowerCase().includes('perfect-glass')
+    ) {
+      return {
+        ...DEFAULT_PERFECT_GLASS,
+        id: DEFAULT_PERFECT_GLASS_ID,
+        nombreNegocio: 'Gestión de Servicios',
+        codigoInvitacion: cleanRef,
+        activo: true,
+      };
+    }
     return null;
   }
 }

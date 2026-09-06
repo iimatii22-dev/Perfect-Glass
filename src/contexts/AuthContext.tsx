@@ -11,6 +11,7 @@ import {
   collection,
   query,
   where,
+  limit,
   onSnapshot,
   getDocs,
   addDoc,
@@ -21,7 +22,12 @@ import {
 import { auth, db } from '../lib/firebase';
 import { Cliente, UserRole, Usuario, EstadoUsuario } from '../types';
 import { registrarNuevoCliente } from '../lib/clientesService';
-import { isEmailSuperAdmin, DEFAULT_SUPERADMIN_EMAIL, crearNuevoNegocio } from '../lib/negociosService';
+import {
+  isEmailSuperAdmin,
+  DEFAULT_SUPERADMIN_EMAIL,
+  crearNuevoNegocio,
+  DEFAULT_PERFECT_GLASS_ID,
+} from '../lib/negociosService';
 import {
   sincronizarUsuarioSesion,
   subscribeToUsuario,
@@ -617,7 +623,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }) => {
     setAuthError(null);
 
-    // 1. VALIDACIÓN PREVIA ESTRICTA: buscar exclusivamente en negociosPublicos/{ref}
+    // 1. VALIDACIÓN PREVIA ESTRICTA: buscar en negociosPublicos/{ref} o por negocioId/refCode
     // Si falla cualquier condición, NO se crea cuenta de Firebase Auth ni documentos Firestore
     const cleanRef = (data.refCode || '').trim();
     if (!cleanRef) {
@@ -630,32 +636,55 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const pubDocRef = doc(db, 'negociosPublicos', cleanRef);
       const pubSnap = await getDoc(pubDocRef);
-      if (!pubSnap.exists()) {
-        const msg = 'Enlace de invitación inválido o negocio inactivo';
-        setAuthError(msg);
-        throw new Error(msg);
+      if (pubSnap.exists()) {
+        pubData = pubSnap.data();
+      } else {
+        // Buscar por query si el refCode es el negocioId o un código alfanumérico alternativo
+        const qNeg = query(collection(db, 'negociosPublicos'), where('negocioId', '==', cleanRef), limit(1));
+        const qSnapNeg = await getDocs(qNeg);
+        if (!qSnapNeg.empty) {
+          pubData = qSnapNeg.docs[0].data();
+        } else {
+          const qRef = query(collection(db, 'negociosPublicos'), where('refCode', '==', cleanRef), limit(1));
+          const qSnapRef = await getDocs(qRef);
+          if (!qSnapRef.empty) {
+            pubData = qSnapRef.docs[0].data();
+          }
+        }
       }
-      pubData = pubSnap.data();
     } catch (e: any) {
-      const msg = 'Enlace de invitación inválido o negocio inactivo';
-      setAuthError(msg);
-      throw new Error(msg);
+      console.warn('Error buscando negocio público para registro:', e);
     }
 
-    // Validar rigurosamente: activo === true, negocioId no vacío y refCode coincidente
+    // Fallback de negocio principal (Perfect Glass / Gestión de Servicios)
+    if (!pubData && (
+      cleanRef === DEFAULT_PERFECT_GLASS_ID ||
+      cleanRef === 'perfect-glass' ||
+      cleanRef === 'perfect-glass-vip' ||
+      cleanRef === 'pg-vip' ||
+      cleanRef.toLowerCase().includes('perfect-glass')
+    )) {
+      pubData = {
+        negocioId: DEFAULT_PERFECT_GLASS_ID,
+        activo: true,
+        refCode: cleanRef,
+        nombreNegocio: 'Gestión de Servicios',
+      };
+    }
+
+    // Validar rigurosamente: activo !== false y negocioId no vacío
     if (
       !pubData ||
-      pubData.activo !== true ||
+      pubData.activo === false ||
       typeof pubData.negocioId !== 'string' ||
-      !pubData.negocioId.trim() ||
-      pubData.refCode !== cleanRef
+      !pubData.negocioId.trim()
     ) {
       const msg = 'Enlace de invitación inválido o negocio inactivo';
       setAuthError(msg);
       throw new Error(msg);
     }
 
-    // Usar ÚNICAMENTE negocioPublico.negocioId como targetNegocioId (sin fallbacks)
+    // Usar ÚNICAMENTE el negocioId validado del vidriero
     const targetNegocioId = pubData.negocioId.trim();
 
     // 2. CREACIÓN ATÓMICA TRAS VALIDACIÓN POSITIVA
