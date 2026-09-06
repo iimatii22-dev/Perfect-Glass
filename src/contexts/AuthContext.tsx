@@ -284,13 +284,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       case 'auth/invalid-credential':
         return 'Correo o contraseña incorrectos.';
       case 'auth/email-already-in-use':
-        return 'Este correo ya se encuentra registrado.';
+        return 'Este correo ya se encuentra registrado. Si es tu cuenta, inicia sesión directamente.';
       case 'auth/weak-password':
         return 'La contraseña debe tener al menos 6 caracteres.';
       case 'auth/too-many-requests':
         return 'Demasiados intentos fallidos. Intenta más tarde.';
-      default:
-        return 'Ocurrió un error en la autenticación. Intenta nuevamente.';
+      case 'auth/operation-not-allowed':
+        return 'El registro por correo y contraseña no está habilitado en Firebase Authentication (actívalo en Firebase Console > Authentication > Sign-in method).';
+      case 'auth/api-key-not-valid':
+      case 'auth/invalid-api-key':
+        return 'La API Key de Firebase no es válida. Verifica la configuración en Vercel.';
+      case 'auth/network-request-failed':
+        return 'Error de conexión con los servidores de autenticación. Verifica tu conexión a internet.';
+      case 'permission-denied':
+        return 'Permiso denegado por reglas de seguridad de Firestore al crear tu ficha.';
+      default: {
+        if (errorCode && errorCode.startsWith('auth/')) {
+          return `Error de autenticación (${errorCode}). Intenta nuevamente o contacta a soporte.`;
+        }
+        if (errorCode && errorCode.includes('permission-denied')) {
+          return 'Error de permisos en la base de datos al guardar tu registro.';
+        }
+        return errorCode && errorCode.length > 5 && !errorCode.includes('\n')
+          ? errorCode
+          : 'Ocurrió un error en la autenticación. Intenta nuevamente.';
+      }
     }
   };
 
@@ -722,10 +740,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       sessionStorage.removeItem('perfectglass_demo_role');
       sessionStorage.removeItem('perfectglass_demo_cliente');
     } catch (error: any) {
+      console.error('Error detallado en registerCliente:', error);
       if (cred?.user) {
         await cred.user.delete().catch(() => {});
       }
-      const msg = formatAuthError(error.code || error.message || '');
+      const rawCode = error?.code || error?.message || '';
+      const msg = formatAuthError(rawCode);
       setAuthError(msg);
       throw new Error(msg);
     }

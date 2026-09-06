@@ -38,10 +38,14 @@ service cloud.firestore {
       return isSuperAdmin() || (isAdmin() && getUserData().negocioId == negocioId);
     }
     
-    // Validación estricta de negocio activo: activo debe ser exactamente true
+    // Validación de negocio activo: el negocio predeterminado perfect-glass siempre es válido,
+    // o debe existir con activo == true en negocios o negociosPublicos
     function isNegocioActivo(negocioId) {
-      return exists(/databases/$(database)/documents/negocios/$(negocioId)) &&
-             get(/databases/$(database)/documents/negocios/$(negocioId)).data.activo == true;
+      return negocioId == 'perfect-glass' ||
+             (exists(/databases/$(database)/documents/negocios/$(negocioId)) &&
+              get(/databases/$(database)/documents/negocios/$(negocioId)).data.activo == true) ||
+             (exists(/databases/$(database)/documents/negociosPublicos/$(negocioId)) &&
+              get(/databases/$(database)/documents/negociosPublicos/$(negocioId)).data.activo == true);
     }
 
     // =========================================================================
@@ -232,7 +236,7 @@ service cloud.firestore {
       allow create: if isSuperAdmin() || (
         isAdmin() && request.resource.data.negocioId == getUserData().negocioId
       ) || (
-        isCliente() &&
+        isSignedIn() &&
         request.resource.data.usuarioId == request.auth.uid &&
         request.resource.data.estadoRegistro == 'pendiente' &&
         request.resource.data.sellosAcumulados == 0 &&

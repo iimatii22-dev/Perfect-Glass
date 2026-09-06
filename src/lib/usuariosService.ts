@@ -153,6 +153,7 @@ export async function sincronizarUsuarioSesion(
     }
   }
 
+  const defaultNombre = cleanEmail.split('@')[0] || 'Usuario';
   const nuevoUsuario: Usuario = {
     uid,
     email: cleanEmail,
@@ -160,6 +161,8 @@ export async function sincronizarUsuarioSesion(
     negocioId,
     estado,
     creadoEn: new Date().toISOString(),
+    nombre: defaultNombre,
+    telefono: '',
   };
 
   await guardarUsuario(nuevoUsuario);

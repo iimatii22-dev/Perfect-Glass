@@ -116,7 +116,8 @@ export function PublicClienteRegisterPage({
 
       setRegistroExitoso(true);
     } catch (err: any) {
-      setFormError(err.message || 'Ocurrió un error al registrar tu cuenta.');
+      console.error('Error en formulario de registro cliente:', err);
+      setFormError(err?.message || 'Ocurrió un error al registrar tu cuenta.');
     } finally {
       setSubmitting(false);
     }

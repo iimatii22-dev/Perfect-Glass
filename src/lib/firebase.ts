@@ -6,9 +6,8 @@ import { getMessaging, isSupported } from 'firebase/messaging';
 import { BusinessConfig } from '../types';
 
 const rawApiKey = (import.meta.env.VITE_FIREBASE_API_KEY || '').trim();
-// Firebase Auth requiere un string con formato válido de API key (ej. prefijo 'AIzaSy')
-// para inicializarse sin lanzar auth/invalid-api-key en la carga del módulo si la variable aún no fue provista.
-const apiKey = rawApiKey || 'AIzaSy_CONFIGURAR_VITE_FIREBASE_API_KEY';
+// Firebase API Key para el proyecto gestion-servicios-uy
+const apiKey = rawApiKey || 'AIzaSyBIoaWQ5RjV_Q8dFtZjClJ28zKP_91_Hkk';
 
 export const firebaseConfig = {
   apiKey,
